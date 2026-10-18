@@ -2,7 +2,8 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.agents import orchestrator
 from app.core import config
-from app.schemas import DonateIn, DonateOut, DraftOut, Item, ItemStatus, ListItemOut, SellOut
+from app.schemas import (DonateIn, DonateOut, DraftOut, Item, ItemStatus, ListItemOut, PostIn,
+                         SellOut)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
@@ -56,6 +57,14 @@ async def parse_item(zip: str = Form(...), text: str | None = Form(None),
 async def sell_draft(draft_id: str):
     try:
         return await orchestrator.sell_draft(draft_id)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
+@router.post("/{draft_id}/post", response_model=ListItemOut, status_code=201)
+async def post_draft(draft_id: str, body: PostIn | None = None):
+    try:
+        return await orchestrator.post_draft(draft_id, body.price if body else None)
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)
 

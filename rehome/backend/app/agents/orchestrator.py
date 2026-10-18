@@ -169,18 +169,70 @@ def _estimate(item: dict) -> PriceQuote:
         "comps": [], "listing_draft": pricing.listing_draft(item)})
 
 
-async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
-    """N1-N3: embed, insert as available, consume the draft."""
+async def _draft_to_item(draft_id: str, pickup_zip: str | None,
+                         donated: bool) -> tuple[ParsedItem, Item, list[float]]:
+    """Embed, claim the draft atomically, insert it as an available item."""
     row = _get_draft(draft_id)
     parsed = ParsedItem.model_validate(row["item"])
     vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
     if db.pop_draft(draft_id) is None:                         # a double-click got it first
         raise FlowError(404, f"Draft {draft_id} was already used.")
-    item_id = db.new_item_id()
     item = await store(parsed, row["note"], (pickup_zip or "").strip() or row["zip"],
-                       row["donor_id"], row["image_url"], item_id, vec)
-    return DonateOut(item_id=item.id, status=item.status,
-                     message=f"Thanks! Your {parsed.item} is now searchable.")
+                       row["donor_id"], row["image_url"], db.new_item_id(), vec,
+                       donated=donated)
+    return parsed, item, vec
+
+
+async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
+    """N1-N3: embed, insert as available, consume the draft; then the
+    matchmaker offers it to open requests it could fill."""
+    parsed, item, vec = await _draft_to_item(draft_id, pickup_zip, donated=True)
+    waiting = await matchmake(item.model_dump(), vec)
+    msg = f"Thanks! Your {parsed.item} is now searchable."
+    if waiting:
+        msg += f" {len(waiting)} open request{'s' * (len(waiting) > 1)} nearby could use it."
+    return DonateOut(item_id=item.id, status=item.status, message=msg,
+                     waiting_requests=[w["request_id"] for w in waiting])
+
+
+async def post_draft(draft_id: str, price: float | None = None) -> ListItemOut:
+    """Sell path, step 2: the draft becomes an item and is listed on the
+    marketplace at `price` (heuristic if None). Unsold after 30 days, the
+    expiry rule moves it to the donation pool."""
+    if price is not None and price <= 0:
+        raise FlowError(422, "Price must be more than $0.")
+    _, item, _ = await _draft_to_item(draft_id, None, donated=False)
+    try:
+        return await list_item(item.id, price=price)
+    except FlowError as e:   # listing failed: it stays available, i.e. in the donation pool
+        raise FlowError(e.status_code, f"{e.detail} {item.id} is in the donation pool.") from e
+
+
+async def matchmake(item: dict, vec: list[float]) -> list[dict]:
+    """Matchmaker agent: open requests this new item could fill, best first.
+    Each one gets the item as a suggested match it can claim with /accept."""
+    threshold = _threshold()
+    waiting = []
+    for req, score in db.open_requests_near(vec, top_k=5):
+        final = score
+        if config.USE_STUBS:     # same stub re-ranking as handle_request
+            final += stub_rules.stub_fit(req, item)
+        if final >= threshold and db.get_match(req["id"], item["id"]) is None:
+            waiting.append({"request_id": req["id"], "zip": req["zip"], "score": round(score, 3),
+                            "needs": req.get("needs") or []})
+    for w in waiting:
+        db.insert_matches([{"request_id": w["request_id"], "item_id": item["id"],
+                            "score": w["score"], "rank": 0, "status": "suggested",
+                            "reason": "New donation that fits your request"}])
+        if db.get_request(w["request_id"])["status"] == "open":
+            db.update_request_status(w["request_id"], "matched")
+        emit("matchmaker", f"{item['id']} may fit {w['request_id']} "
+             f"({', '.join(w['needs']) or 'open request'}, zip {w['zip']})",
+             item_id=item["id"], request_id=w["request_id"])
+    if not waiting:
+        emit("matchmaker", f"No open requests fit {item['id']} yet; it stays searchable",
+             item_id=item["id"])
+    return waiting
 
 
 async def donate(note: str | None, zip_code: str, donor_id: str,
@@ -193,15 +245,20 @@ async def donate(note: str | None, zip_code: str, donor_id: str,
 
 async def store(parsed: ParsedItem, note: str | None, zip_code: str,
                 donor_id: str, image_url: str | None, item_id: str,
-                vec: list[float] | None = None) -> Item:
+                vec: list[float] | None = None, donated: bool = True) -> Item:
+    """Insert as available. `donated=False` (about to be listed for sale)
+    skips the item_donated impact count."""
     if vec is None:
         vec = await llm.embed(_embed_text(parsed.model_dump()))
     row = {**parsed.model_dump(), "id": item_id, "donor_id": donor_id, "note": note,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}
     db.insert_item(row)
-    emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
-         event_type="item_donated", category=parsed.category)
+    if donated:
+        emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
+             event_type="item_donated", category=parsed.category)
+    else:
+        emit("orchestrator", f"Saved {item_id} to list for sale", item_id=item_id)
     return _public(row)
 
 
@@ -354,7 +411,8 @@ async def seed_demo() -> int:
 
 
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
-async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
+async def list_item(item_id: str, platform: str = "nostr",
+                    price: float | None = None) -> ListItemOut:
     row = db.get_item(item_id)
     if row is None:
         raise FlowError(404, f"Item {item_id} not found.")
@@ -364,9 +422,12 @@ async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
     channel = marketplace.get_channel(platform)
     _listing_now.add(item_id)
     try:
-        price = marketplace.suggest_price(row)
-        emit("orchestrator", f"Priced {item_id} at ${price} ({row['category']}, {row['condition']})",
-             item_id=item_id)
+        if price is None:
+            price = marketplace.suggest_price(row)
+            how = f"{row['category']}, {row['condition']}"
+        else:
+            price, how = round(float(price), 2), "from the price quote"
+        emit("orchestrator", f"Priced {item_id} at ${price:g} ({how})", item_id=item_id)
         try:
             result = await channel.publish(row, price)
         except Exception as e:

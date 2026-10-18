@@ -156,6 +156,19 @@ def insert_request(row: dict) -> dict:
     return row
 
 
+def open_requests_near(query_vec: list[float], top_k: int = 5) -> list[tuple[dict, float]]:
+    """pgvector search over requests that aren't closed (the matchmaker's view)."""
+    rows = _all(f"""SELECT {', '.join(REQUEST_COLS)}, 1 - (embedding <=> %(q)s::vector) AS score
+                    FROM requests WHERE status <> 'closed' AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %(q)s::vector LIMIT %(k)s""",
+                {"q": _vec(query_vec), "k": top_k})
+    out = []
+    for r in rows:
+        score = r.pop("score")
+        out.append((r, 0.0 if score is None or math.isnan(score) else float(score)))
+    return out
+
+
 def get_request(request_id: str) -> dict | None:
     return _one(f"SELECT {', '.join(REQUEST_COLS)} FROM requests WHERE id = %s", (request_id,))
 

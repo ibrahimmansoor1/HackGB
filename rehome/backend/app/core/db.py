@@ -92,6 +92,19 @@ def insert_request(row: dict) -> dict:
     return row
 
 
+def open_requests_near(query_vec: list[float], top_k: int = 5) -> list[tuple[dict, float]]:
+    """Not-yet-closed requests by cosine similarity to an item's vector."""
+    q = np.asarray(query_vec)
+    scored = []
+    for row in _requests.values():
+        if row["status"] == "closed" or row.get("embedding") is None:
+            continue
+        v = np.asarray(row["embedding"])
+        scored.append((row, float(q @ v / (np.linalg.norm(q) * np.linalg.norm(v) + 1e-9))))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k]
+
+
 def get_request(request_id: str) -> dict | None:
     return _requests.get(request_id)
 

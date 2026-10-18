@@ -61,6 +61,11 @@ class DonateOut(BaseModel):
     item_id: str
     status: ItemStatus
     message: str
+    waiting_requests: list[str] = Field(default_factory=list)   # matchmaker found these
+
+
+class PostIn(BaseModel):
+    price: Optional[float] = None   # USD; default = category x condition heuristic
 
 
 class Price(BaseModel):
@@ -191,7 +196,7 @@ class ImpactOut(BaseModel):
 
 class AgentEvent(BaseModel):
     id: int
-    agent: Literal["orchestrator", "parser", "pricing", "requester"]
+    agent: Literal["orchestrator", "concierge", "parser", "pricing", "requester", "matchmaker"]
     event_type: Optional[Literal["item_parsed", "item_donated", "price_quoted",
                                  "request_made", "match_made", "match_accepted"]] = None
     category: Optional[str] = None

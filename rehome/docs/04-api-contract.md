@@ -100,9 +100,21 @@ The body is optional, and so is `pickup_zip`; it defaults to the draft's `zip`.
 
 **Response `201`:**
 ```json
-{ "item_id": "itm_0142", "status": "available", "message": "Thanks! Your puffer jacket is now searchable." }
+{ "item_id": "itm_0142", "status": "available",
+  "message": "Thanks! Your puffer jacket is now searchable. 1 open request nearby could use it.",
+  "waiting_requests": ["req_0031"] }
 ```
-The draft is consumed.
+The draft is consumed. The **matchmaker agent** then checks open (not `closed`) requests against the new item; each that fits gets it as a `suggested` match (claimable with `/api/matches/accept`), moves from `open` to `matched`, and is listed in `waiting_requests`.
+
+---
+
+## `POST /api/items/{draft_id}/post` — list a draft for sale
+
+**Request** (optional): `{ "price": 45 }`. Without a price, the category × condition heuristic is used.
+
+**Response `201`:** same as `POST /api/items/{id}/list` (`{item, listing}`). The draft becomes an item and is listed (`listed`); unsold after 30 days, the expiry rule puts it in the donation pool. Doesn't count as `item_donated`.
+
+**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
 
 **Errors:** `404` unknown, expired, or already-used draft.
 
