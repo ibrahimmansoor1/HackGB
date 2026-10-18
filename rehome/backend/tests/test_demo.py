@@ -132,8 +132,8 @@ def test_chicago_request_matches_insulated_outerwear():
     for m in matches:
         assert 0 < m["score"] <= 1 and m["reason"] and len(m["reason"].split()) <= 12
     assert "built for sub-freezing winters" in matches[0]["reason"]
-    reserved = client.get("/api/items?status=reserved").json()["items"]
-    assert [i["id"] for i in reserved] == [matches[0]["item_id"]]
+    assert all(m["title"] == m["item"]["item"] for m in matches)    # seed items have no brand
+    assert client.get("/api/items?status=reserved").json()["items"] == []   # reserve on accept
 
 
 def test_donated_jacket_is_matched_in_the_demo():
@@ -178,7 +178,9 @@ def test_feed_shows_every_docs05_step():
     start = _last_event_id()
     item_id = client.post("/api/items", data={"zip": "54301", "note": "Black puffer jacket, size M"}
                           ).json()["id"]
-    client.post("/api/requests", json=CHICAGO)
+    req = client.post("/api/requests", json=CHICAGO).json()
+    top = req["matches"][0]["item_id"]
+    client.post("/api/matches/accept", json={"request_id": req["request_id"], "item_id": top})
     spare = client.get("/api/items?status=available").json()["items"][0]["id"]
     client.post(f"/api/items/{spare}/list")
     client.post("/api/admin/simulate-expiry")
@@ -197,7 +199,8 @@ def test_feed_shows_every_docs05_step():
     assert any(a == "requester" and m.startswith("Inferred sub-freezing winters, snow; needs "
                                                  "insulated, water-resistant") for a, m in by_agent)
     assert any(re.fullmatch(r"Found \d+ candidates", m) for m in msgs)
-    assert any(re.fullmatch(r"Matched itm_\d+ \(0\.\d+\) and reserved it", m) for m in msgs)
+    assert any(re.fullmatch(r"Top match itm_\d+ \(0\.\d+\)", m) for m in msgs)
+    assert any(re.fullmatch(rf"{top} reserved; donor notified, pickup in \d{{5}}", m) for m in msgs)
     assert any(m.startswith(f"Priced {spare} at $") for m in msgs)
     assert f"Listed {spare} on Shopstr (dry run)" in msgs
     assert f"30 days unsold — {spare} moved to donation pool" in msgs
@@ -227,10 +230,13 @@ def test_list_a_seeded_item_dry_run():
 
 
 def test_matched_items_list_unless_reserved():
-    """Rank 1 is reserved for the requester (409); the other matches stay listable."""
+    """The accepted match is reserved (409 to list); the other matches stay listable."""
     client.post("/api/admin/seed")
-    matches = client.post("/api/requests", json=CHICAGO).json()["matches"]
+    req = client.post("/api/requests", json=CHICAGO).json()
+    matches = req["matches"]
     assert len(matches) >= 2
+    client.post("/api/matches/accept",
+                json={"request_id": req["request_id"], "item_id": matches[0]["item_id"]})
     assert client.post(f"/api/items/{matches[0]['item_id']}/list").status_code == 409
     assert client.post(f"/api/items/{matches[1]['item_id']}/list").status_code == 200
 
@@ -328,9 +334,9 @@ def test_word_sizes_are_normalized():
     assert stub_rules.find_size("size L") == "L"
 
 
-def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
+def test_item_listed_during_reason_call_is_not_matched(monkeypatch):
     """With a real model the reasons call is slow; an item listed meanwhile must
-    not be reserved too."""
+    not be suggested."""
     from app.agents import orchestrator
     client.post("/api/admin/seed")
     real = orchestrator._reasons
@@ -344,6 +350,4 @@ def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
     body = client.post("/api/requests", json=CHICAGO).json()
     listed = {i["id"] for i in client.get("/api/items?status=listed").json()["items"]}
     matched = {m["item_id"] for m in body["matches"]}
-    reserved = {i["id"] for i in client.get("/api/items?status=reserved").json()["items"]}
-    assert listed and not listed & matched and not listed & reserved
-    assert reserved <= matched
+    assert listed and matched and not listed & matched

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.agents import orchestrator
 from app.core import config
-from app.routers import admin, events, items, listings, requests
+from app.routers import admin, events, items, listings, matches, requests
 
 app = FastAPI(title="Rehome API", version="0.1.0")
 
@@ -17,6 +17,7 @@ app.add_middleware(
 
 app.include_router(items.router)
 app.include_router(requests.router)
+app.include_router(matches.router)
 app.include_router(events.router)
 app.include_router(admin.router)
 app.include_router(listings.router)

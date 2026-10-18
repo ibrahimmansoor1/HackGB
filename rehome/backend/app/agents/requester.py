@@ -9,10 +9,11 @@ SYSTEM_PROMPT = f"""You turn a person's request for a donated item into a search
 Infer practical context the person did not say: climate from the location
 and month, activity, age group. Translate that context into concrete item
 attributes from this vocabulary: {", ".join(stub_rules.ATTRIBUTE_VOCAB)}.
-Return ONLY a JSON object with exactly these keys: need, inferred_context,
+Return ONLY a JSON object with exactly these keys: needs, inferred_context,
 must_have, nice_to_have, size, search_text.
+- needs: the core items, as short noun phrases.
 - must_have: attributes without which the item would not serve the need.
-- search_text: one line combining need and attributes; no location names.
+- search_text: one line combining needs and attributes; no location names.
 No prose, no markdown fences."""
 
 

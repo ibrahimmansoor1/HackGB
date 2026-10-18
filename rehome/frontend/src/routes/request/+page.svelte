@@ -1,18 +1,27 @@
 <script>
-  import { requestItem } from '$lib/api.js';
+  import { requestItem, acceptMatch } from '$lib/api.js';
 
   let text = $state('');
   let zip = $state('');
   let loading = $state(false);
   let error = $state('');
   let result = $state(null);
+  let claiming = $state('');
+  let claimed = $state(null);
 
   async function submit() {
     if (!text || !zip) { error = 'Describe what you need and add your zip code.'; return; }
-    loading = true; error = ''; result = null;
+    loading = true; error = ''; result = null; claimed = null;
     try { result = await requestItem({ text, zip }); }
     catch (e) { error = e.message; }
     finally { loading = false; }
+  }
+
+  async function claim(m) {
+    claiming = m.item_id; error = '';
+    try { claimed = { ...(await acceptMatch(result.request_id, m.item_id)), title: m.title }; }
+    catch (e) { error = e.message; }
+    finally { claiming = ''; }
   }
 </script>
 
@@ -29,7 +38,10 @@
 
 {#if error}<p role="alert">{error}</p>{/if}
 
-{#if result}
+{#if claimed}
+  <h2>It’s yours: {claimed.title}</h2>
+  <p role="status">{claimed.handoff.message}</p>
+{:else if result}
   {#if result.query.inferred_context.length}
     <p>We took into account: {result.query.inferred_context.join(', ')}.</p>
   {/if}
@@ -38,8 +50,11 @@
     <ol>
       {#each result.matches as m (m.item_id)}
         <li>
-          <strong>{m.item.color} {m.item.item}</strong>{m.item.size ? `, size ${m.item.size}` : ''}
+          <strong>{m.item.color} {m.title}</strong>{m.item.size ? `, size ${m.item.size}` : ''}
           <br />{m.reason}
+          <br /><button onclick={() => claim(m)} disabled={!!claiming}>
+            {claiming === m.item_id ? 'Claiming…' : 'Claim this'}
+          </button>
         </li>
       {/each}
     </ol>

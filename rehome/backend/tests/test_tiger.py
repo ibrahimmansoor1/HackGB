@@ -106,7 +106,7 @@ def test_requests_and_matches(pg):
     item_id = _item(pg, _vec(3))
     req_id = pg.new_request_id()
     pg.insert_request({"id": req_id, "requester_id": "r", "raw_text": "coat", "zip": "60601",
-                       "need": "winter coat", "inferred_context": ["snow"],
+                       "needs": ["winter coat"], "inferred_context": ["snow"],
                        "must_have": ["insulated"], "nice_to_have": [], "size": None,
                        "search_text": "insulated coat", "embedding": _vec(3),
                        "status": "matched", "created_at": pg.now()})
@@ -118,6 +118,16 @@ def test_requests_and_matches(pg):
                          (req_id,)).fetchone()
     assert req["needs"] == ["winter coat"]
     assert m["id"].startswith("mat_") and m["rank"] == 1
+
+    assert pg.get_request(req_id)["status"] == "matched" and pg.get_request("req_x") is None
+    match = pg.get_match(req_id, item_id)
+    assert match["id"] == m["id"] and pg.get_match(req_id, "itm_x") is None
+    assert pg.reserve_item(item_id) is True
+    assert pg.reserve_item(item_id) is False          # already reserved
+    pg.update_match_status(match["id"], "accepted")
+    pg.update_request_status(req_id, "closed")
+    assert pg.get_match(req_id, item_id)["status"] == "accepted"
+    assert pg.get_request(req_id)["status"] == "closed"
 
 
 def test_listings(pg):

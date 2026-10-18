@@ -17,6 +17,7 @@ _listings: dict[str, dict] = {}
 _drafts: dict[str, dict] = {}
 _item_ids = itertools.count(1)
 _draft_ids = itertools.count(1)
+_match_ids = itertools.count(1)
 _req_ids = itertools.count(1)
 _event_ids = itertools.count(1)
 _listing_ids = itertools.count(1)
@@ -91,8 +92,37 @@ def insert_request(row: dict) -> dict:
     return row
 
 
+def get_request(request_id: str) -> dict | None:
+    return _requests.get(request_id)
+
+
+def update_request_status(request_id: str, status: str) -> None:
+    _requests[request_id]["status"] = status
+
+
 def insert_matches(rows: list[dict]) -> None:
-    _matches.extend(rows)
+    for r in rows:
+        _matches.append({**r, "id": r.get("id") or f"mat_{next(_match_ids):04d}"})
+
+
+def get_match(request_id: str, item_id: str) -> dict | None:
+    return next((m for m in _matches
+                 if m["request_id"] == request_id and m["item_id"] == item_id), None)
+
+
+def update_match_status(match_id: str, status: str) -> None:
+    for m in _matches:
+        if m["id"] == match_id:
+            m["status"] = status
+
+
+def reserve_item(item_id: str) -> bool:
+    """available -> reserved in one step; False if it wasn't available."""
+    row = _items.get(item_id)
+    if row is None or row["status"] != "available":
+        return False
+    row["status"] = "reserved"
+    return True
 
 
 # ---- listings (marketplace) ------------------------------------------------

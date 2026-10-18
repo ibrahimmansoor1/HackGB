@@ -151,12 +151,32 @@ def vector_search(query_vec: list[float], top_k: int,
 
 # ---- requests & matches ----------------------------------------------------
 def insert_request(row: dict) -> dict:
-    row = dict(row)
-    if "needs" not in row and row.get("need"):
-        row["needs"] = [row["need"]]   # StructuredQuery.need -> needs (docs/03)
     extra = {"embedding": ("%s::vector", _vec(row["embedding"]))} if row.get("embedding") else {}
     _insert("requests", REQUEST_COLS, row, extra)
     return row
+
+
+def get_request(request_id: str) -> dict | None:
+    return _one(f"SELECT {', '.join(REQUEST_COLS)} FROM requests WHERE id = %s", (request_id,))
+
+
+def update_request_status(request_id: str, status: str) -> None:
+    _run("UPDATE requests SET status = %s WHERE id = %s", (status, request_id))
+
+
+def get_match(request_id: str, item_id: str) -> dict | None:
+    return _one("""SELECT id, request_id, item_id, score, rank, reason, status FROM matches
+                   WHERE request_id = %s AND item_id = %s""", (request_id, item_id))
+
+
+def update_match_status(match_id: str, status: str) -> None:
+    _run("UPDATE matches SET status = %s WHERE id = %s", (status, match_id))
+
+
+def reserve_item(item_id: str) -> bool:
+    """available -> reserved atomically; False if someone else got it first."""
+    return _one("""UPDATE items SET status = 'reserved'
+                   WHERE id = %s AND status = 'available' RETURNING id""", (item_id,)) is not None
 
 
 def insert_matches(rows: list[dict]) -> None:

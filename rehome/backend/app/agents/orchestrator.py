@@ -7,8 +7,8 @@ from app.agents.events import emit
 from app.core import config, db, llm
 from app.integrations import marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
-from app.schemas import (AgentEvent, DonateOut, DraftOut, ExpiryOut, Item, Listing,
-                         ListItemOut, Match, ParsedItem, RequestOut)
+from app.schemas import (AcceptOut, AgentEvent, DonateOut, DraftOut, ExpiryOut, Handoff, Item,
+                         Listing, ListItemOut, Match, ParsedItem, RequestOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -170,10 +170,10 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
 
     reasons = await _reasons(query, [r for r, _, _ in ranked])
     # The reasons call can take seconds with a real model; drop anything that
-    # got listed or reserved meanwhile so we never reserve an unavailable item.
+    # got listed or reserved meanwhile so we never suggest an unavailable item.
     ranked = [(row, score, final) for row, score, final in ranked
               if _still_available(row["id"])]
-    matches = [Match(item_id=row["id"], rank=i + 1, score=round(score, 3),
+    matches = [Match(item_id=row["id"], title=_title(row), rank=i + 1, score=round(score, 3),
                      reason=reasons.get(row["id"], "Similar to what you asked for"),
                      item=_public(row))
                for i, (row, score, _) in enumerate(ranked)]
@@ -185,15 +185,41 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     db.insert_matches([{"request_id": req_id, "item_id": m.item_id, "score": m.score,
                         "rank": m.rank, "reason": m.reason, "status": "suggested"}
                        for m in matches])
-    if matches:
-        db.update_item_status(matches[0].item_id, "reserved")
-        emit("orchestrator", f"Matched {matches[0].item_id} ({matches[0].score}) and reserved it",
+    if matches:   # suggestions only: nothing is reserved until accept
+        emit("orchestrator", f"Top match {matches[0].item_id} ({matches[0].score})",
              request_id=req_id, item_id=matches[0].item_id,
              event_type="match_made", category=matches[0].item.category)
     else:
         emit("orchestrator", "No good match yet; request left open", request_id=req_id)
 
     return RequestOut(request_id=req_id, status=status, query=query, matches=matches)
+
+
+async def accept_match(request_id: str, item_id: str) -> AcceptOut:
+    """A1-A2: claim one suggested match. Re-checks the item is still available."""
+    req = db.get_request(request_id)
+    if req is None:
+        raise FlowError(404, f"Request {request_id} not found.")
+    match = db.get_match(request_id, item_id)
+    if match is None:
+        raise FlowError(404, f"{item_id} isn't one of the matches for {request_id}.")
+    if req["status"] == "closed":
+        raise FlowError(409, f"Request {request_id} already has an accepted match.")
+    if item_id in _listing_now or not db.reserve_item(item_id):
+        raise FlowError(409, f"Item {item_id} is no longer available.")
+    db.update_match_status(match["id"], "accepted")
+    db.update_request_status(request_id, "closed")
+    row = db.get_item(item_id)
+    emit("orchestrator", f"{item_id} reserved; donor notified, pickup in {row['zip']}",
+         request_id=request_id, item_id=item_id, event_type="match_accepted",
+         category=row["category"])
+    return AcceptOut(match_id=match["id"], item_id=item_id, donor_notified=True,
+                     handoff=Handoff(zip=row["zip"], message="Reserved. The donor has been "
+                                     f"notified; pickup in {row['zip']}."))
+
+
+def _title(row: dict) -> str:
+    return f"{row['brand']} {row['item']}" if row.get("brand") else row["item"]
 
 
 def _still_available(item_id: str) -> bool:

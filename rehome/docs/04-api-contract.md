@@ -181,7 +181,7 @@ If nothing clears the threshold: `"status": "open"`, `"matches": []`.
 ```
 Exchange method is undecided; for now `handoff.method` is always `"pickup"` and notification is an event only. The request becomes `closed`.
 
-**Errors:** `404` unknown request, or the item wasn't one of its matches · `409` item no longer `available`.
+**Errors:** `404` unknown request, or the item wasn't one of its matches · `409` item no longer `available` (reserved by someone else, listed, or being listed), or the request is already `closed`.
 
 ---
 

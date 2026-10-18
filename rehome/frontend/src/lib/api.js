@@ -40,6 +40,17 @@ export async function requestItem({ text, zip }) {
   );
 }
 
+/** A1: claim a match. Returns { match_id, item_id, status, donor_notified, handoff }. */
+export async function acceptMatch(requestId, itemId) {
+  return handle(
+    await fetch(`${BASE}/api/matches/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestId, item_id: itemId })
+    })
+  );
+}
+
 /** Activity feed: events with id > after. */
 export async function getEvents(after = 0) {
   return handle(await fetch(`${BASE}/api/events?after=${after}`));

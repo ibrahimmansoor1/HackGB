@@ -297,7 +297,7 @@ def parse_need(text: str, zip_code: str) -> dict:
     search = " ".join(dict.fromkeys(w for w in words if w))
     for place in COLD_PLACES + RAINY_PLACES + HOT_PLACES:
         search = re.sub(rf"\b{re.escape(place)}\b", "", search, flags=re.I)
-    return {"need": need, "inferred_context": context, "must_have": must,
+    return {"needs": [need], "inferred_context": context, "must_have": must,
             "nice_to_have": nice, "size": find_size(text),
             "search_text": re.sub(r"\s+", " ", search).strip()}
 
@@ -305,6 +305,10 @@ def parse_need(text: str, zip_code: str) -> dict:
 # ---- match reasons -------------------------------------------------------------
 EQUIVALENT = {"water-resistant": {"water-resistant", "waterproof"},
               "warm": {"warm", "insulated", "wool", "fleece"}}
+
+
+def _first_need(query: dict) -> str:
+    return (query.get("needs") or [""])[0]
 
 
 def satisfies(attributes: list[str], wanted: str) -> bool:
@@ -315,7 +319,7 @@ def stub_fit(query: dict, row: dict) -> float:
     """Stub-mode ranking nudge: hashed bag-of-words can't tell a kids coat from
     an adult one, so reward the asked-for category and keep kids and adult
     items apart."""
-    _, cat = item_phrase(query.get("need") or "")
+    _, cat = item_phrase(_first_need(query))
     wants_kid = "for a child" in (query.get("inferred_context") or [])
     adj = 0.1 if cat and cat == row["category"] else 0.0
     must = query.get("must_have") or []
@@ -332,7 +336,7 @@ def reason(query: dict, row: dict) -> str:
     hits = [a for a in must if satisfies(row["attributes"], a)]
     missing = [a for a in must if a not in hits]
     ctx = (query.get("inferred_context") or [None])[0]
-    noun, cat = find_noun(query.get("need") or "")[:2]
+    noun, cat = find_noun(_first_need(query))[:2]
     if cat and cat != row["category"] and row["category"] != "kids":
         feats = " and ".join(hits[:2] or row["attributes"][:2])
         return " ".join(f"Not {noun}, but {feats}".split()[:12]) if feats else f"Not {noun}"

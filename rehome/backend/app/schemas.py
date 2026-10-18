@@ -26,7 +26,7 @@ class ParsedItem(BaseModel):
 
 class StructuredQuery(BaseModel):
     """Requester agent output (R3)."""
-    need: str
+    needs: list[str] = Field(min_length=1)
     inferred_context: list[str] = Field(default_factory=list)
     must_have: list[str] = Field(default_factory=list)
     nice_to_have: list[str] = Field(default_factory=list)
@@ -71,6 +71,7 @@ class RequestIn(BaseModel):
 
 class Match(BaseModel):
     item_id: str
+    title: str                  # item's `item`, brand prefixed when known
     rank: int
     score: float
     reason: str
@@ -82,6 +83,25 @@ class RequestOut(BaseModel):
     status: Literal["open", "matched", "closed"]
     query: StructuredQuery
     matches: list[Match]
+
+
+class AcceptIn(BaseModel):
+    request_id: str
+    item_id: str
+
+
+class Handoff(BaseModel):
+    method: Literal["pickup"] = "pickup"   # exchange method undecided (docs/02)
+    zip: str
+    message: str
+
+
+class AcceptOut(BaseModel):
+    match_id: str
+    item_id: str
+    status: Literal["reserved"] = "reserved"
+    donor_notified: bool
+    handoff: Handoff
 
 
 class Listing(BaseModel):
