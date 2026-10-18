@@ -46,6 +46,8 @@
   .parser .agent { color: #6b4fbb; }
   .requester .agent { color: #1f7a6d; }
   .pricing .agent { color: #a15c00; }
+  .concierge .agent { color: #1d5fa8; }
+  .matchmaker .agent { color: #b0306a; }
   .error { color: #b00020; }
   .muted { color: #777; }
 </style>

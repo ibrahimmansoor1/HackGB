@@ -22,6 +22,7 @@ rehome/
 │   ├── 05-agents.md        ← agent prompts and JSON schemas
 │   ├── 06-mvp-scope.md     ← what's in, what's stretch, build order, owners
 │   └── 07-demo-script.md   ← expo table walkthrough
+├── infra/modal_llm.py      ← Modal vLLM server (tool calling) for the agents
 ├── backend/                ← FastAPI
 │   ├── requirements.txt
 │   ├── app/
@@ -34,7 +35,8 @@ rehome/
 │   │   │   └── llm.py      ← model clients (Gemini parser, Modal text + embeddings)
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
-│   │   │   ├── orchestrator.py
+│   │   │   ├── concierge.py ← LangGraph agent: prices, checks demand, lists or donates
+│   │   │   ├── orchestrator.py ← deterministic service layer; owns the DB; matchmaker
 │   │   │   ├── parser.py   ← photo/text → ParsedItem (Gemini)
 │   │   │   ├── pricing.py  ← item + eBay comps → price range + listing draft (Modal)
 │   │   │   ├── requester.py
@@ -63,6 +65,8 @@ rehome/
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
 │       ├── test_drafts.py  ← parse → donate
 │       ├── test_matches.py ← request → accept
+│       ├── test_concierge.py ← concierge agent (rules + faked Modal model)
+│       ├── test_matchmaker.py ← donations filling waiting requests
 │       ├── test_impact.py  ← /api/impact
 │       ├── test_parser.py  ← Gemini parser (HTTP faked)
 │       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
@@ -218,6 +222,7 @@ Disclosed per HackGB rules.
 | Tool / API | What we used it for |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
+| [LangGraph](https://langchain-ai.github.io/langgraph/) + [langchain-openai](https://pypi.org/project/langchain-openai/) | The concierge agent's loop: a Modal tool-calling model chooses which specialist agent (pricing, matchmaker, Shopstr listing, donation) to call, then acts for the donor |
 | [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
 | [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
 | [eBay Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) | Active listings as pricing comps for the Sell path (`EBAY_APP_ID`, `EBAY_CERT_ID`); prices shown as "currently listed for". Without keys, Sell uses a category × condition estimate. |

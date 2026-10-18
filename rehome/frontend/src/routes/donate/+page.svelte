@@ -1,5 +1,5 @@
 <script>
-  import { parseItem, sellDraft, donateDraft } from '$lib/api.js';
+  import { parseItem, sellDraft, donateDraft, handleDraft } from '$lib/api.js';
 
   let images = $state([]);
   let text = $state('');
@@ -9,6 +9,7 @@
   let draft = $state(null);
   let donated = $state(null);
   let quote = $state(null);
+  let handled = $state(null);
 
   async function run(label, fn) {
     loading = label; error = '';
@@ -24,6 +25,10 @@
     run('Describing your item…', async () => { draft = await parseItem({ images, text, zip }); });
   }
 
+  function letAgentsHandle() {
+    run('Our agents are on it…', async () => { handled = await handleDraft(draft.draft_id); });
+  }
+
   function sell() {
     run('Checking prices…', async () => { quote = await sellDraft(draft.draft_id); });
   }
@@ -33,7 +38,7 @@
   }
 
   function startOver() {
-    draft = null; donated = null; quote = null; images = []; text = '';
+    draft = null; donated = null; quote = null; handled = null; images = []; text = '';
   }
 </script>
 
@@ -58,10 +63,20 @@
   <p>{it.summary}</p>
   <p>{it.attributes.join(', ')} · {it.condition}{it.size ? ` · size ${it.size}` : ''}</p>
 
-  {#if donated}
+  {#if handled}
+    <p role="status">{handled.summary}</p>
+    {#if handled.listing}
+      <p><a href={handled.listing.url} target="_blank" rel="noopener noreferrer">See the listing</a></p>
+    {/if}
+    <button onclick={startOver}>Give something else</button>
+  {:else if donated}
     <p role="status">{donated.message}</p>
     <button onclick={startOver}>Give something else</button>
   {:else}
+    {#if !quote}
+      <button onclick={letAgentsHandle} disabled={!!loading}>Let Rehome handle it</button>
+      <p class="hint">Our agents price it, check who nearby needs it, then sell or donate it for you.</p>
+    {/if}
     {#if quote}
       {@const p = quote.suggested_price}
       <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for' : 'Estimated value'}:
@@ -85,3 +100,7 @@
 {/if}
 
 {#if error}<p role="alert">{error}</p>{/if}
+
+<style>
+  .hint { color: #666; margin-top: 0.25rem; }
+</style>

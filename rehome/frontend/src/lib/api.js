@@ -18,6 +18,17 @@ export async function parseItem({ images = [], text, zip }) {
   return handle(await fetch(`${BASE}/api/items/parse`, { method: 'POST', body: form }));
 }
 
+/** Hand a draft to the concierge agent. Returns { action, summary, steps, listing, ... }. */
+export async function handleDraft(draftId, preference = 'auto') {
+  return handle(
+    await fetch(`${BASE}/api/items/${draftId}/handle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preference })
+    })
+  );
+}
+
 /** S1: price a draft. Returns { suggested_price, comps, listing_draft, basis }. */
 export async function sellDraft(draftId) {
   return handle(await fetch(`${BASE}/api/items/${draftId}/sell`, { method: 'POST' }));

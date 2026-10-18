@@ -7,7 +7,9 @@
 | Donor app | `frontend/src/routes/donate` | Upload photo/text → see parsed item → choose **Sell** or **Donate** | – |
 | Requester app | `frontend/src/routes/request` | Submit need + zip, show matches, claim one | – |
 | Impact dashboard | `frontend/src/routes/feed` (+ `ActivityFeed.svelte`) | Live stats from `/api/impact` + agent activity feed | – |
-| Orchestrator | `backend/app/agents/orchestrator.py` | **Deterministic Python**, not an LLM loop. Routes work, embeds, reads/writes DB, ranks, emits every step as an event. The donor's UI choice decides sell vs donate, so no LLM routing. | – |
+| **Concierge agent** | `backend/app/agents/concierge.py` | **LangGraph agent loop** on a Modal tool-calling model. Takes over after upload: prices the item, checks who nearby needs it, then lists or donates it, and tells the donor why. Rule policy when offline or if the model fails. | Modal |
+| Matchmaker agent | orchestrator (`matchmake`) | New donation → open requests it fits (pgvector) → suggested matches + feed events | Tiger Data |
+| Orchestrator | `backend/app/agents/orchestrator.py` | **Deterministic Python** service layer: routes work, embeds, reads/writes DB, ranks, emits every step as an event. The concierge's tools call it; on the manual path the donor's UI choice decides sell vs donate. | – |
 | Input parser agent | `backend/app/agents/parser.py` | Photo/text → `ParsedItem` via **Gemini API** (vision) | Gemini (MLH) |
 | Pricing agent | `backend/app/agents/pricing.py` *(create)* | `ParsedItem` + eBay comps → price range + listing draft. LLM on **Modal**; comps from **eBay Browse API** | Modal |
 | Donation step | orchestrator function, **not an LLM** | Modal embedding → DB insert | Modal |
@@ -68,6 +70,27 @@ flowchart TD
 
 1. **N2** Orchestrator embeds `summary + attributes + item` on Modal.
 2. **N3** Inserts an `items` row, `status = available`. Now searchable.
+3. **N4** The matchmaker agent offers it to open requests it fits (suggested matches).
+
+**Let Rehome handle it** (`POST /api/items/{draft_id}/handle`): the agentic path
+
+The **concierge agent** (LangGraph, Modal tool-calling model) does the donor's remaining work:
+
+1. Calls `get_price_quote` (pricing agent + eBay comps, the Sell steps above) and `check_local_demand` (matchmaker, read-only).
+2. Decides: donate if someone nearby is waiting or it's worth under $15, otherwise sell (the donor can force either).
+3. Acts: `list_for_sale(price)` posts it on Shopstr (unsold 30 days → donation pool), or `donate_item` runs the Donate steps above.
+4. Tells the donor what it did and why. Every tool call is an event, so the feed shows the agents working.
+
+```mermaid
+flowchart LR
+  D[Donor: photo + 'just want it gone'] --> P[Parser agent · Gemini]
+  P --> C{{Concierge agent<br/>LangGraph · Modal}}
+  C -- get_price_quote --> PR[Pricing agent · Modal<br/>+ eBay comps]
+  C -- check_local_demand --> M[Matchmaker agent<br/>pgvector on Tiger]
+  C -- list_for_sale --> S[Shopstr listing<br/>30 days → donation pool]
+  C -- donate_item --> N[Donation + matchmaker<br/>offers it to waiting requests]
+  C --> R[Donor: what I did and why]
+```
 
 ### Requester path
 

@@ -9,7 +9,9 @@ This file is the contract between frontend and backend. Change it here first.
 | GET | `/api/health` | Liveness + stub flags |
 | POST | `/api/items/parse` | Parse photo/text into a draft; offer sell or donate |
 | POST | `/api/items/{draft_id}/sell` | Price range, comps, listing draft |
-| POST | `/api/items/{draft_id}/donate` | Embed + insert; item becomes searchable |
+| POST | `/api/items/{draft_id}/donate` | Embed + insert; item becomes searchable; matchmaker offers it to open requests |
+| POST | `/api/items/{draft_id}/handle` | Concierge agent prices it, checks demand, then lists or donates it |
+| POST | `/api/items/{draft_id}/post` | List a draft on Shopstr at a price |
 | GET | `/api/items?status=` | List inventory |
 | POST | `/api/requests` | Need → ranked matches (nothing reserved) |
 | POST | `/api/matches/accept` | Claim a match; reserves the item |
@@ -105,6 +107,32 @@ The body is optional, and so is `pickup_zip`; it defaults to the draft's `zip`.
   "waiting_requests": ["req_0031"] }
 ```
 The draft is consumed. The **matchmaker agent** then checks open (not `closed`) requests against the new item; each that fits gets it as a `suggested` match (claimable with `/api/matches/accept`), moves from `open` to `matched`, and is listed in `waiting_requests`.
+
+---
+
+## `POST /api/items/{draft_id}/handle` — let the agents handle it
+
+Hands the draft to the **concierge agent** (docs/05): it prices the item, checks local demand, then lists or donates it.
+
+**Request** (optional): `{ "preference": "auto" }`: `auto` (the agent decides), `sell`, or `donate`.
+
+**Response `200`:**
+```json
+{
+  "draft_id": "drf_0007",
+  "action": "donated",
+  "item_id": "itm_0142",
+  "summary": "I donated your puffer jacket because 1 person nearby is already looking for one and offered it to them.",
+  "brain": "modal",
+  "steps": ["get_price_quote", "check_local_demand", "donate_item"],
+  "price_quote": { "low": 15, "high": 23, "currency": "USD" },
+  "waiting_requests": ["req_0031"],
+  "listing": null
+}
+```
+`action` is `listed` (then `listing` is the Shopstr listing) or `donated`. `brain` is `modal` when the Modal model made every decision, `rules` when the offline rule policy did (no Modal, or the model failed and rules finished the job). The draft is consumed.
+
+**Errors:** `404` unknown, expired, or already-used draft · `422` bad `preference` · `502` the run couldn't list or donate (e.g. no relay accepted the listing).
 
 ---
 
