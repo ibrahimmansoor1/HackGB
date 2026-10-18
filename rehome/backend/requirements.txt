@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 httpx==0.28.1
 numpy==2.2.1
 pytest==8.3.4
+nostr-sdk==0.45.1

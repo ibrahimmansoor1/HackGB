@@ -20,3 +20,13 @@ USE_STUBS = not MODAL_ENDPOINT_URL or "your-workspace" in MODAL_ENDPOINT_URL
 
 UPLOAD_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Marketplace: Nostr classified listings (NIP-99), shown on Shopstr.
+# Posts go live only when NOSTR_NSEC is set AND MARKETPLACE_DRY_RUN=false.
+NOSTR_NSEC = os.getenv("NOSTR_NSEC", "").strip()
+NOSTR_RELAYS = [r.strip() for r in os.getenv(
+    "NOSTR_RELAYS", "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net").split(",")
+    if r.strip()]
+MARKETPLACE_DRY_RUN = os.getenv("MARKETPLACE_DRY_RUN", "true").strip().lower() not in (
+    "false", "0", "no", "off")
+LISTING_LOCATION = os.getenv("LISTING_LOCATION", "").strip()
