@@ -1,0 +1,146 @@
+"""Postgres backend (core/db_pg.py) against a real database.
+
+Skipped unless TEST_DATABASE_URL is set. Runs in a throwaway schema
+`rehome_test`, so pointing it at the team's Tiger service doesn't touch the
+real tables:
+
+    $env:TEST_DATABASE_URL = "postgres://..."; python -m pytest tests/test_tiger.py
+"""
+import os
+from pathlib import Path
+
+import pytest
+
+URL = os.getenv("TEST_DATABASE_URL", "")
+pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL not set")
+
+SCHEMA = "rehome_test"
+DIM = 8
+
+
+@pytest.fixture(scope="module")
+def pg():
+    import psycopg
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+    from app.core import db_pg
+    from scripts.init_db import SCHEMA as SQL_FILE, statements
+
+    with psycopg.connect(URL, autocommit=True) as conn:
+        has_timescale = conn.execute(
+            "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'").fetchone()
+        conn.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
+        conn.execute(f"CREATE SCHEMA {SCHEMA}")
+        conn.execute(f"SET search_path = {SCHEMA}, public")
+        sql = Path(SQL_FILE).read_text().replace("{EMBED_DIM}", str(DIM))
+        for stmt in statements(sql):
+            # Plain Postgres (no TimescaleDB) can still test everything else.
+            if not has_timescale and ("timescale" in stmt or "hypertable" in stmt
+                                      or "impact_hourly" in stmt):
+                continue
+            conn.execute(stmt)
+
+    pool = ConnectionPool(URL, min_size=1, max_size=2, open=True,
+                          kwargs={"autocommit": True, "row_factory": dict_row,
+                                  "options": f"-c search_path={SCHEMA},public"})
+    old = db_pg._pool
+    db_pg._pool = pool
+    yield db_pg
+    db_pg._pool = old
+    pool.close()
+    with psycopg.connect(URL, autocommit=True) as conn:
+        conn.execute(f"DROP MATERIALIZED VIEW IF EXISTS {SCHEMA}.impact_hourly CASCADE")
+        conn.execute(f"DROP SCHEMA {SCHEMA} CASCADE")
+
+
+def _vec(*hot):
+    v = [0.0] * DIM
+    for i in hot:
+        v[i] = 1.0
+    return v
+
+
+def _item(pg, vec, status="available", **kw):
+    row = {"id": pg.new_item_id(), "donor_id": "d", "zip": "54311", "category": "outerwear",
+           "item": "coat", "color": "black", "size": None, "condition": "good",
+           "season": "winter", "attributes": ["insulated", "hooded"], "summary": "A coat.",
+           "image_url": None, "note": None, "status": status, "embedding": vec,
+           "created_at": pg.now(), **kw}
+    pg.insert_item(row)
+    return row["id"]
+
+
+def test_items_roundtrip_and_status(pg):
+    item_id = _item(pg, _vec(0))
+    row = pg.get_item(item_id)
+    assert row["attributes"] == ["insulated", "hooded"]
+    assert "embedding" not in row
+    pg.update_item_status(item_id, "reserved")
+    assert pg.get_item(item_id)["status"] == "reserved"
+    assert item_id in [r["id"] for r in pg.list_items("reserved")]
+    assert pg.get_item("itm_nope") is None
+
+
+def test_ids_are_unique_and_formatted(pg):
+    a, b = pg.new_item_id(), pg.new_item_id()
+    assert a != b and a.startswith("itm_")
+    assert pg.new_request_id().startswith("req_")
+    assert pg.new_listing_id().startswith("lst_")
+
+
+def test_vector_search_orders_by_similarity_and_filters_status(pg):
+    near = _item(pg, _vec(1, 2))
+    far = _item(pg, _vec(5))
+    hidden = _item(pg, _vec(1, 2), status="reserved")
+    zero = _item(pg, [0.0] * DIM)
+    got = pg.vector_search(_vec(1, 2), top_k=50)
+    ids = [r["id"] for r, _ in got]
+    assert hidden not in ids
+    assert ids.index(near) < ids.index(far)
+    scores = dict((r["id"], s) for r, s in got)
+    assert scores[near] == pytest.approx(1.0)
+    assert scores[zero] == 0.0            # NaN from a zero vector becomes 0
+
+
+def test_requests_and_matches(pg):
+    item_id = _item(pg, _vec(3))
+    req_id = pg.new_request_id()
+    pg.insert_request({"id": req_id, "requester_id": "r", "raw_text": "coat", "zip": "60601",
+                       "need": "winter coat", "inferred_context": ["snow"],
+                       "must_have": ["insulated"], "nice_to_have": [], "size": None,
+                       "search_text": "insulated coat", "embedding": _vec(3),
+                       "status": "matched", "created_at": pg.now()})
+    pg.insert_matches([{"request_id": req_id, "item_id": item_id, "score": 0.9,
+                        "rank": 1, "reason": "Warm", "status": "suggested"}])
+    with pg._db().connection() as conn:
+        req = conn.execute("SELECT needs FROM requests WHERE id = %s", (req_id,)).fetchone()
+        m = conn.execute("SELECT id, rank FROM matches WHERE request_id = %s",
+                         (req_id,)).fetchone()
+    assert req["needs"] == ["winter coat"]
+    assert m["id"].startswith("mat_") and m["rank"] == 1
+
+
+def test_listings(pg):
+    item_id = _item(pg, _vec(4))
+    lst_id = pg.new_listing_id()
+    now = pg.now()
+    pg.insert_listing({"id": lst_id, "item_id": item_id, "platform": "nostr",
+                       "external_id": "ab", "price": 24.99, "listed_at": now,
+                       "expires_at": now, "url": "https://x", "status": "active",
+                       "dry_run": True, "relays_accepted": []})
+    active = {r["id"]: r for r in pg.list_listings("active")}
+    assert active[lst_id]["price"] == 24.99
+    pg.update_listing(lst_id, status="expired")
+    assert lst_id in [r["id"] for r in pg.list_listings("expired")]
+    with pytest.raises(ValueError):
+        pg.update_listing(lst_id, bogus=1)
+
+
+def test_events_feed_order_and_fields(pg):
+    a = pg.insert_event({"agent": "parser", "message": "one", "event_type": "item_parsed",
+                         "category": "outerwear", "created_at": pg.now()})
+    b = pg.insert_event({"agent": "orchestrator", "message": "two", "created_at": pg.now()})
+    got = pg.list_events(after=a["id"] - 1)
+    assert [e["message"] for e in got][:2] == ["one", "two"]
+    assert got[0]["event_type"] == "item_parsed" and got[0]["created_at"] is not None
+    assert pg.list_events(after=b["id"]) == []

@@ -29,7 +29,8 @@ rehome/
 │   │   ├── schemas.py      ← Pydantic models (mirror of docs/03 and docs/05)
 │   │   ├── core/
 │   │   │   ├── config.py   ← env settings
-│   │   │   ├── db.py       ← database access (in-memory stub until sponsor DB is wired)
+│   │   │   ├── db.py       ← database access (in-memory stub; Tiger when DATABASE_URL is set)
+│   │   │   ├── db_pg.py    ← Tiger Data (Postgres + pgvector) version of db.py
 │   │   │   └── llm.py      ← model client (Modal), embeddings
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
@@ -46,15 +47,18 @@ rehome/
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
 │   │       └── events.py
+│   ├── db/schema.sql       ← Tiger tables, hypertable, continuous aggregate
 │   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
+│   │   ├── init_db.py      ← creates the Tiger tables from db/schema.sql
 │   │   ├── nostr_keygen.py ← one-time Nostr key setup
 │   │   └── make_seed_images.py ← redraws static/seed/
 │   └── tests/
 │       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
-│       └── test_marketplace.py
+│       ├── test_marketplace.py
+│       └── test_tiger.py   ← Postgres backend; runs only with TEST_DATABASE_URL
 └── frontend/               ← SvelteKit
     ├── package.json
     ├── svelte.config.js
@@ -133,6 +137,26 @@ The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
 The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
+
+## Database (Tiger Data)
+
+With `DATABASE_URL` blank the backend uses the in-memory DB. To use Tiger:
+
+1. Create a service at [console.cloud.timescale.com](https://console.cloud.timescale.com) and copy its connection string (`postgres://tsdbadmin:...?sslmode=require`).
+2. In `.env`, set `DATABASE_URL` to it, and `EMBED_DIM` to the embedding model's vector size (leave `384` for stub embeddings).
+3. From `backend/` with the venv active, create the tables once:
+   ```bash
+   python scripts/init_db.py           # safe to re-run
+   python scripts/init_db.py --reset   # drop everything and start over (wipes data)
+   ```
+4. Restart the backend. `GET /api/health` reports `"db": "tiger"`.
+
+Data now survives restarts; `POST /api/admin/seed` won't load the demo items twice. Use `--reset` between demo rehearsals.
+
+Postgres tests run in a throwaway `rehome_test` schema, so they're safe against the team's service:
+```powershell
+$env:TEST_DATABASE_URL = "postgres://..."; python -m pytest tests/test_tiger.py
+```
 
 ## Marketplace (Nostr/Shopstr)
 

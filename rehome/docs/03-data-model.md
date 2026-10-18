@@ -112,7 +112,9 @@ Database: **Tiger Data** (managed Postgres + TimescaleDB). pgvector does matchin
 
 The Nostr event never contains `donor_id`, `note`, or other personal data: only catalog fields, price, and `location` (`LISTING_LOCATION`, else the item's zip).
 
-## Tiger schema (starting point; verify against Tiger docs)
+## Tiger schema
+
+The real schema is `backend/db/schema.sql`, applied by `backend/scripts/init_db.py` (adds sequences for ids, CHECK constraints on statuses, a refresh policy, and `timescaledb.materialized_only = false` so the dashboard sees fresh events). Summary:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;

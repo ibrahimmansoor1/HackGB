@@ -22,8 +22,9 @@ This file is the contract between frontend and backend. Change it here first.
 ## `GET /api/health`
 
 ```json
-{ "status": "ok", "stubs": true }
+{ "status": "ok", "stubs": true, "db": "memory" }
 ```
+`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`.
 
 ---
 

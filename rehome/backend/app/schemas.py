@@ -91,7 +91,10 @@ class ExpiryOut(BaseModel):
 
 class AgentEvent(BaseModel):
     id: int
-    agent: Literal["orchestrator", "parser", "requester"]
+    agent: Literal["orchestrator", "parser", "pricing", "requester"]
+    event_type: Optional[Literal["item_parsed", "item_donated", "price_quoted",
+                                 "request_made", "match_made", "match_accepted"]] = None
+    category: Optional[str] = None
     message: str
     item_id: Optional[str] = None
     request_id: Optional[str] = None
