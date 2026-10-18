@@ -31,10 +31,12 @@ rehome/
 │   │   │   ├── config.py   ← env settings
 │   │   │   ├── db.py       ← database access (in-memory stub until sponsor DB is wired)
 │   │   │   └── llm.py      ← model client (Modal), embeddings
+│   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
 │   │   │   ├── orchestrator.py
 │   │   │   ├── parser.py
 │   │   │   ├── requester.py
+│   │   │   ├── stub_rules.py ← offline keyword rules used when no model is set
 │   │   │   └── events.py   ← activity feed logger
 │   │   ├── integrations/
 │   │   │   └── marketplace.py ← Nostr NIP-99 listings (Shopstr), pricing
@@ -44,10 +46,14 @@ rehome/
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
 │   │       └── events.py
+│   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
-│   │   └── nostr_keygen.py ← one-time Nostr key setup
+│   │   ├── nostr_keygen.py ← one-time Nostr key setup
+│   │   └── make_seed_images.py ← redraws static/seed/
 │   └── tests/
+│       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
+│       ├── test_demo.py    ← the docs/07 demo end to end, offline
 │       └── test_marketplace.py
 └── frontend/               ← SvelteKit
     ├── package.json
@@ -68,17 +74,44 @@ rehome/
 
 ## Run it
 
-**Backend**
+Needs **Python 3.11 or 3.12** (the pinned numpy/pydantic don't install on 3.13+) and **Node 18+**. Every command below starts from the `rehome/` folder:
+
 ```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp ../.env.example ../.env   # fill in keys
-uvicorn app.main:app --reload --port 8000
-# docs at http://localhost:8000/docs
+git clone https://github.com/shuja-waraich-03/HackGB.git
+cd HackGB/rehome
 ```
 
-**Frontend**
+**Backend: macOS / Linux**
+```bash
+cp .env.example .env            # works as is: no keys needed for the demo
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+**Backend: Windows PowerShell**
+```powershell
+Copy-Item .env.example .env     # works as is: no keys needed for the demo
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1      # if blocked: Set-ExecutionPolicy -Scope Process Bypass
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+API docs: http://localhost:8000/docs. Run the tests from `backend/` with the venv active: `python -m pytest`.
+
+**Load the demo inventory** (18 items with photos) in a second terminal:
+```bash
+curl -X POST http://localhost:8000/api/admin/seed                       # macOS / Linux
+```
+```powershell
+Invoke-RestMethod -Method Post http://localhost:8000/api/admin/seed     # Windows PowerShell
+```
+
+**Frontend** (new terminal, from `rehome/`)
 ```bash
 cd frontend
 npm install
@@ -86,6 +119,8 @@ npm run dev   # http://localhost:5173
 ```
 
 The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
+
+**Two laptops (app + feed screen):** run the backend with `--host 0.0.0.0`, then in `.env` set `PUBLIC_BASE_URL=http://<backend laptop's IP>:8000` (so photo links work from the other laptop) and add the frontend's origin to `CORS_ORIGINS`.
 
 ## Working together
 
@@ -95,13 +130,9 @@ The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ## Before the model is wired up
 
-With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**: agents return fake but valid data, so the frontend can be built end to end on day one. Load demo inventory with:
+With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
-```bash
-curl -X POST http://localhost:8000/api/admin/seed
-```
-
-`GET /api/health` reports `"stubs": true` while stub mode is on.
+The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
 
 ## Marketplace (Nostr/Shopstr)
 
@@ -115,14 +146,27 @@ curl -X POST http://localhost:8000/api/admin/seed
 | `NOSTR_RELAYS` | `wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net` | Comma-separated relays to publish to |
 | `MARKETPLACE_DRY_RUN` | `true` | Set to `false` to publish for real |
 | `LISTING_LOCATION` | empty | Public `location` tag (falls back to the item's zip) |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | Base for photo URLs. Set it to a public URL (e.g. a tunnel) so listings carry a photo |
 
 **First live post**
 ```bash
 cd backend
 python scripts/nostr_keygen.py        # prints NOSTR_NSEC=nsec1... and your npub; run once
-# in ../.env: NOSTR_NSEC=nsec1...   MARKETPLACE_DRY_RUN=false   LISTING_LOCATION=Boston, MA
+# in ../.env: NOSTR_NSEC=nsec1...   MARKETPLACE_DRY_RUN=false   LISTING_LOCATION=Green Bay, WI
 uvicorn app.main:app --reload --port 8000
 curl -X POST http://localhost:8000/api/admin/seed
 curl -X POST http://localhost:8000/api/items/itm_0001/list
 ```
-The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. Items with uploaded photos only get an `image` tag when `image_url` is a public `http(s)` URL; local `/static/...` paths are skipped.
+The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. Photo URLs are built from `PUBLIC_BASE_URL`. A listing only gets an `image` tag when that URL is publicly reachable (not `localhost` or a private LAN address), so for photos on Shopstr, expose the backend with a tunnel (e.g. `ngrok http 8000`) and set `PUBLIC_BASE_URL` to the tunnel URL before seeding or donating.
+
+## AI tools and APIs used
+
+Disclosed per HackGB rules.
+
+| Tool / API | What we used it for |
+|---|---|
+| [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
+| [Modal](https://modal.com) | Hosts the vision + text model and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [nostr-sdk](https://pypi.org/project/nostr-sdk/) (rust-nostr Python bindings) | Builds and signs NIP-99 classified listings (kind 30402) and sends them to relays |
+| [Nostr](https://nostr.com) relays + [Shopstr](https://shopstr.store) | Public marketplace where listed items appear; NIP-99 is an open standard, so no API key or developer approval is needed |
+| Google Gemini *(optional)* | Alternative model provider if credits arrive (`GEMINI_API_KEY`) |
