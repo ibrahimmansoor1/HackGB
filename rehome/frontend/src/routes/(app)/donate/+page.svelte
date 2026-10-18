@@ -1,5 +1,6 @@
 <script>
-  import { donateItem } from '$lib/api.js';
+  import { donateItem, listItem } from '$lib/api.js';
+  import ListingInfo from '$lib/ListingInfo.svelte';
   import { takePendingPhoto } from '$lib/pending.js';
 
   // A photo picked on the landing page arrives here ready to go.
@@ -10,6 +11,9 @@
   let loading = $state(false);
   let error = $state('');
   let item = $state(null);
+  let listing = $state(null);
+  let listingBusy = $state(false);
+  let listingError = $state('');
 
   $effect(() => {
     if (!image) { preview = null; return; }
@@ -21,10 +25,18 @@
   async function submit() {
     if (!image && !note) { error = 'Add a photo or a short description.'; return; }
     if (!zip) { error = 'Add your zip code.'; return; }
-    loading = true; error = ''; item = null;
+    loading = true; error = ''; item = null; listing = null; listingError = '';
     try { item = await donateItem({ image, note, zip }); }
     catch (e) { error = e.message; }
     finally { loading = false; }
+  }
+
+  // Selling instead: list the saved item on Nostr (shows on Shopstr).
+  async function sell() {
+    listingBusy = true; listingError = '';
+    try { ({ item, listing } = await listItem(item.id)); }
+    catch (e) { listingError = e.message; }
+    finally { listingBusy = false; }
   }
 </script>
 
@@ -46,8 +58,21 @@
 {#if error}<p role="alert">{error}</p>{/if}
 
 {#if item}
-  <h2>Listed: {item.color} {item.item}</h2>
+  <h2>Saved: {item.color} {item.item}</h2>
   {#if item.image_url}<img src={item.image_url} alt={item.summary} width="240" />{/if}
   <p>{item.summary}</p>
   <p>{item.attributes.join(', ')} · {item.condition}{item.size ? ` · size ${item.size}` : ''}</p>
+
+  {#if listing}
+    <h2>For sale</h2>
+    <ListingInfo {listing} />
+    <p class="text-sm text-ink-soft">If it doesn't sell in 30 days, it goes back to the donation pool.
+      See all listings on the <a class="underline" href="/marketplace">marketplace</a>.</p>
+  {:else if item.status === 'available'}
+    <p class="text-ink-soft">It's ready for someone nearby. Or sell it instead:</p>
+    <button onclick={sell} disabled={listingBusy}>
+      {listingBusy ? 'Listing on Shopstr…' : 'List on Shopstr'}
+    </button>
+    {#if listingError}<p role="alert">{listingError}</p>{/if}
+  {/if}
 {/if}

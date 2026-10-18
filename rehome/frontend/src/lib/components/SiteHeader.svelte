@@ -13,6 +13,7 @@
   <nav class="flex items-center gap-1 text-sm font-medium" aria-label="Main">
     <a href="/#how" class="hidden rounded-full px-3 py-2 hover:bg-ink/5 md:block">How it works</a>
     <a href="/feed" class="hidden rounded-full px-3 py-2 hover:bg-ink/5 md:block">Live activity</a>
+    <a href="/marketplace" class="hidden rounded-full px-3 py-2 hover:bg-ink/5 sm:block">Marketplace</a>
     <a href="/donate" class="rounded-full px-3 py-2 hover:bg-ink/5">Give</a>
     <a href="/request" class="rounded-full bg-ink px-4 py-2 text-ground hover:bg-ink/85">Get help</a>
   </nav>

@@ -39,9 +39,18 @@
     <h2>Matches</h2>
     <ol>
       {#each result.matches as m (m.item_id)}
-        <li>
-          <strong>{m.item.color} {m.item.item}</strong>{m.item.size ? `, size ${m.item.size}` : ''}
-          <br />{m.reason}
+        <li class="mb-3 list-none">
+          <div class="flex items-start gap-3">
+            <span class="w-5 shrink-0 pt-0.5 font-mono text-sm text-ink-soft">{m.rank}.</span>
+            {#if m.item.image_url}
+              <img src={m.item.image_url} alt="" loading="lazy"
+                class="size-14 shrink-0 rounded-lg border border-line object-cover" />
+            {/if}
+            <div>
+              <strong>{m.item.color} {m.item.item}</strong>{m.item.size ? `, size ${m.item.size}` : ''}
+              <br />{m.reason}
+            </div>
+          </div>
         </li>
       {/each}
     </ol>

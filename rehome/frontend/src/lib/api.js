@@ -37,3 +37,19 @@ export async function getEvents(after = 0) {
 export async function listItems(status = 'available') {
   return handle(await fetch(`${BASE}/api/items?status=${status}`));
 }
+
+/** Marketplace: price an available item and list it on Nostr (shows on Shopstr).
+ *  Returns { item, listing }. Errors: 409 not available, 502 no relay accepted it. */
+export async function listItem(itemId) {
+  return handle(await fetch(`${BASE}/api/items/${encodeURIComponent(itemId)}/list`, { method: 'POST' }));
+}
+
+/** Marketplace listings, newest first, each with its item. status: '' | 'active' | 'expired'. */
+export async function getListings(status = '') {
+  return handle(await fetch(`${BASE}/api/listings${status ? `?status=${status}` : ''}`));
+}
+
+/** Demo: treat active listings as 30 days old; unsold items go back to the donation pool. */
+export async function simulateExpiry() {
+  return handle(await fetch(`${BASE}/api/admin/simulate-expiry`, { method: 'POST' }));
+}
