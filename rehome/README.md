@@ -184,7 +184,7 @@ The in-memory DB resets when the backend restarts. Between demo rehearsals, eith
 
 ## Models on Modal
 
-`infra/modal_llm.py` serves **GLM-5.3-Flash** (320B MoE, 18B active, reads images) as an OpenAI-compatible vLLM server with tool calling on, following [Modal's vLLM example](https://modal.com/docs/examples/vllm_inference) and [vLLM's GLM-5.3-Flash recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash). It runs on 4× H200 and scales to zero after 15 minutes idle; the first boot downloads ~306 GiB of weights into a Modal Volume. One model serves every Modal agent, and the photo parser too until `GEMINI_API_KEY` is set. GLM always reasons before answering; `MODAL_REASONING_EFFORT=low` (default) keeps agent steps quick.
+`infra/modal_llm.py` serves **Qwen3-VL-8B-Instruct** (reads images, calls tools) as an OpenAI-compatible vLLM server, following [Modal's vLLM example](https://modal.com/docs/examples/vllm_inference). It runs on one L40S (~$1.95/hour) and scales to zero after 10 minutes idle; the first boot downloads ~17 GB of weights into a Modal Volume. One model serves every Modal agent, and the photo parser too until `GEMINI_API_KEY` is set. Leave `MODAL_REASONING_EFFORT` blank for Qwen (it's for thinking models like GLM-5.3, which we started on: 4× H200, about 9× the cost).
 
 ```bash
 pip install modal && modal setup     # once
