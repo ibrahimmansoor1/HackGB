@@ -20,10 +20,10 @@ from app.core import config
 
 KIND_LISTING = 30402
 CURRENCY = "USD"
-SHOPSTR_LISTING_URL = "https://shopstr.store/listing/{naddr}"
-SHOPSTR_SELLER_URL = "https://shopstr.store/marketplace/{npub}"
-CONNECT_WAIT_S = 5     # wait for relay sockets before sending
-TIMEOUT_S = 8          # hard cap on connect + send, so the API never hangs
+SHOPSTR_LISTING_URL = "https://shopstr.store/listing/{naddr}"   # seller: /marketplace/<npub>
+CONNECT_WAIT_S = 4     # wait for relay sockets before sending
+OK_WAIT_S = 4          # wait for each relay's OK after sending
+TIMEOUT_S = 10         # hard backstop on connect + send, so the API never hangs
 NADDR_RELAY_HINTS = 3
 
 SUSTAINABILITY_NOTE = ("Buying secondhand keeps this out of a landfill. If it doesn't sell in "
@@ -150,11 +150,11 @@ def _tags(ev) -> list[list[str]]:
     return [t.to_vec() for t in ev.tags()]
 
 
-def seller_url(npub: str) -> str:
-    return SHOPSTR_SELLER_URL.format(npub=npub)
-
-
 # ---- relays ----------------------------------------------------------------
+def _norm(url) -> str:
+    return str(url).rstrip("/").lower()
+
+
 def _new_client() -> Client:
     """Factory so tests can swap in a fake client (no network in tests)."""
     return Client()
@@ -166,26 +166,28 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
     client = _new_client()
     accepted: list[str] = []
     failed: list[str] = []
-    added: list[str] = []
+    added: dict[str, str] = {}   # normalized relay URL -> URL as configured
     for url in relays:
         try:
-            await client.add_relay(RelayUrl.parse(url))
-            added.append(url)
+            parsed = RelayUrl.parse(url)
+            await client.add_relay(parsed)
+            added[_norm(parsed)] = url
         except Exception:
             failed.append(url)
 
     async def _send():
         await client.connect(timedelta(seconds=CONNECT_WAIT_S))
-        return await client.send_event(ev)
+        # Relays that don't answer within ok_timeout count as failed.
+        return await client.send_event(ev, ok_timeout=timedelta(seconds=OK_WAIT_S))
 
     if added:
         try:
             out = await asyncio.wait_for(_send(), timeout=TIMEOUT_S)
-            ok = {str(u).rstrip("/") for u in out.success}
-            accepted = [u for u in added if u.rstrip("/") in ok]
-        except Exception:
+            ok = {_norm(u) for u in out.success}
+            accepted = [url for key, url in added.items() if key in ok]
+        except Exception:   # timeout or SDK error: nothing confirmed
             accepted = []
-        failed += [u for u in added if u not in accepted]
+        failed += [url for url in added.values() if url not in accepted]
     try:
         await asyncio.wait_for(client.disconnect(), timeout=2)
     except Exception:

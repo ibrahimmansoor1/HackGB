@@ -66,7 +66,7 @@ class FakeClient:
     async def connect(self, wait=None):
         pass
 
-    async def send_event(self, ev):
+    async def send_event(self, ev, ok_timeout=None):
         if self.hang:
             await asyncio.sleep(60)
         self.sent.append(ev)

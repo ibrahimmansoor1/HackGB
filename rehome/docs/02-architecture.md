@@ -66,7 +66,7 @@ flowchart LR
   L -->|30 days, unsold| A[Republish status = sold<br/>item → available, donation pool]
 ```
 
-- `backend/app/integrations/marketplace.py` builds and signs the listing (`d` tag = item id, so republishing replaces it) and sends it to `NOSTR_RELAYS` with an ~8 s cap. Only the orchestrator calls it; it never touches the DB.
+- `backend/app/integrations/marketplace.py` builds and signs the listing (`d` tag = item id, so republishing replaces it) and sends it to `NOSTR_RELAYS` within ~8 s (4 s to connect + 4 s for relay OKs, hard cap 10 s); slow relays count as failed. Only the orchestrator calls it; it never touches the DB.
 - Dry run by default: without `NOSTR_NSEC`, or with `MARKETPLACE_DRY_RUN=true`, events are signed with a throwaway key and not sent.
 - Live mode with zero relays accepting → item stays `available`, error event, `502`.
 - Channels share one small interface (`Channel`: `publish`, `mark_sold`). **Roadmap:** eBay (developer approval pending), Etsy, Shopify, each as another `Channel` in `CHANNELS`.
