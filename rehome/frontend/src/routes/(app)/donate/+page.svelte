@@ -2,6 +2,11 @@
   import { parseItem, sellDraft, donateDraft, postDraft, handleDraft } from '$lib/api.js';
   import { takePendingPhoto } from '$lib/pending.js';
   import ListingInfo from '$lib/ListingInfo.svelte';
+  import DropOff from '$lib/DropOff.svelte';
+
+  // Under this (top of the quoted range), suggest a drop-off instead of selling.
+  const CHEAP_UNDER = 10;
+  const isCheap = (p) => p && p.high < CHEAP_UNDER;
 
   // A photo picked on the landing page arrives here ready to go.
   const pending = takePendingPhoto();
@@ -17,6 +22,7 @@
   let price = $state(null);
   let sold = $state(null);   // { item, listing } once it's listed
   let handled = $state(null);
+  let value = $state(null);  // price quote fetched right after parsing
 
   $effect(() => {
     if (!images.length) { preview = null; return; }
@@ -35,8 +41,19 @@
   function describe() {
     if (!images.length && !text) { error = 'Add a photo or a short description.'; return; }
     if (!zip) { error = 'Add your zip code.'; return; }
-    draft = null; donated = null; quote = null; sold = null; handled = null;
-    run('Describing your item…', async () => { draft = await parseItem({ images, text, zip }); });
+    draft = null; donated = null; quote = null; sold = null; handled = null; value = null;
+    run('Describing your item…', async () => {
+      draft = await parseItem({ images, text, zip });
+      estimate(draft.draft_id);
+    });
+  }
+
+  // Price it in the background so the value shows up without pressing Sell.
+  async function estimate(draftId) {
+    try {
+      const q = await sellDraft(draftId);
+      if (draft?.draft_id === draftId) value = q;
+    } catch { /* the Sell button still works */ }
   }
 
   function letAgentsHandle() {
@@ -45,7 +62,7 @@
 
   function sell() {
     run('Checking prices…', async () => {
-      quote = await sellDraft(draft.draft_id);
+      quote = value ?? await sellDraft(draft.draft_id);
       const p = quote.suggested_price;
       price = Math.round((p.low + p.high) / 2);
     });
@@ -61,7 +78,7 @@
   }
 
   function startOver() {
-    draft = null; donated = null; quote = null; sold = null; price = null; handled = null;
+    draft = null; donated = null; quote = null; sold = null; price = null; handled = null; value = null;
     images = []; text = '';
   }
 </script>
@@ -91,9 +108,11 @@
   {#if handled}
     <p role="status">{handled.summary}</p>
     {#if handled.listing}<ListingInfo listing={handled.listing} />{/if}
+    {#if isCheap(handled.price_quote)}<DropOff item={it} {zip} price={handled.price_quote} after />{/if}
     <button onclick={startOver}>Give something else</button>
   {:else if donated}
     <p role="status">{donated.message}</p>
+    {#if isCheap(value?.suggested_price)}<DropOff item={it} {zip} price={value.suggested_price} after />{/if}
     <button onclick={startOver}>Give something else</button>
   {:else if sold}
     <h2>For sale</h2>
@@ -103,6 +122,11 @@
     <button onclick={startOver}>Give something else</button>
   {:else}
     {#if !quote}
+      {#if isCheap(value?.suggested_price)}
+        <DropOff item={it} {zip} price={value.suggested_price} />
+      {:else if value}
+        <p>Worth about ${value.suggested_price.low}–${value.suggested_price.high}</p>
+      {/if}
       <button onclick={letAgentsHandle} disabled={!!loading}>Let Rehome handle it</button>
       <p class="hint">Our agents price it, check who nearby needs it, then sell or donate it for you.</p>
     {/if}
@@ -110,6 +134,7 @@
       {@const p = quote.suggested_price}
       <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for' : 'Estimated value'}:
         ${p.low}–${p.high}</h3>
+      {#if isCheap(p)}<DropOff item={it} {zip} price={p} />{/if}
       {#if quote.comps.length}
         <ul>
           {#each quote.comps as c (c.url)}
