@@ -394,3 +394,29 @@ def test_preview_page_escapes_html():
     client.post(f"/api/items/{item_id}/list")
     page = client.get(f"/listings/{item_id}").text
     assert "<script>alert(1)</script>" not in page
+
+
+# ---- demo reset --------------------------------------------------------------
+def test_reset_clears_inventory_and_reseeds_from_0001():
+    client.post("/api/admin/seed")
+    client.post("/api/requests", json=CHICAGO)
+    listed = client.get("/api/items?status=available").json()["items"][0]["id"]
+    client.post(f"/api/items/{listed}/list")
+    last = _last_event_id()
+
+    r = client.post("/api/admin/reset")
+    assert r.status_code == 200 and r.json() == {"reset": True, "closed_listings": [listed]}
+    assert client.get("/api/items").json()["items"] == []
+    assert client.get("/api/listings").json()["listings"] == []
+    msgs = _messages(after=last)
+    assert f"30 days unsold — {listed} moved to donation pool" in msgs   # closed first
+    assert "Demo reset: inventory, requests, and listings cleared" in msgs
+    assert all(e["id"] > last for e in client.get(f"/api/events?after={last}").json()["events"])
+
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}
+    ids = [i["id"] for i in client.get("/api/items").json()["items"]]
+    assert ids[0] == "itm_0001" and len(ids) == 18
+
+
+def test_reset_with_nothing_listed():
+    assert client.post("/api/admin/reset").json() == {"reset": True, "closed_listings": []}

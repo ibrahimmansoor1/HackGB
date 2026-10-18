@@ -18,6 +18,18 @@ _event_ids = itertools.count(1)
 _listing_ids = itertools.count(1)
 
 
+def reset() -> None:
+    """Empty the demo inventory (items, requests, matches, listings) and restart
+    their ids at 0001. Events and their ids are kept, so a feed polling
+    ?after=<id> keeps working."""
+    global _item_ids, _req_ids, _listing_ids
+    _items.clear()
+    _requests.clear()
+    _matches.clear()
+    _listings.clear()
+    _item_ids, _req_ids, _listing_ids = (itertools.count(1) for _ in range(3))
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 

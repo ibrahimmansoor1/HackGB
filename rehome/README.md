@@ -134,7 +134,7 @@ The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 
 With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
-The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
+The in-memory DB resets when the backend restarts. Between demo rehearsals, either restart it or call `POST /api/admin/reset` (closes any live listings first, clears the inventory, keeps the activity feed), then seed again.
 
 ## Marketplace (Nostr/Shopstr)
 

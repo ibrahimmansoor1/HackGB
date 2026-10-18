@@ -175,6 +175,19 @@ async def seed_demo() -> int:
     return len(_seeded)
 
 
+async def reset_demo() -> dict:
+    """Start a rehearsal from scratch without restarting the server. Active
+    listings are closed on the marketplace first, so nothing stays live for an
+    item that no longer exists. Seed again afterwards."""
+    if _listing_now:
+        raise FlowError(409, "An item is being listed right now; try again in a few seconds.")
+    closed = (await expire_listings()).expired if db.list_listings("active") else []
+    db.reset()
+    _seeded.clear()
+    emit("orchestrator", "Demo reset: inventory, requests, and listings cleared")
+    return {"reset": True, "closed_listings": closed}
+
+
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
 async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
     row = db.get_item(item_id)

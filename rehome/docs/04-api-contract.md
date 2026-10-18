@@ -118,6 +118,7 @@ Poll every ~1 s. Returns events with `id > after`, oldest first, max 50.
 | `POST` | `/api/items/{id}/list` | Price the item, post it as a Nostr classified listing (shows on Shopstr), set `listed` |
 | `POST` | `/api/admin/simulate-expiry` | Treat all active listings as 30 days old; close them on Nostr; item → `available` (donation pool) |
 | `GET` | `/api/listings?status=active` | List marketplace listings (`status` optional: `active` or `expired`; anything else is `422`) |
+| `POST` | `/api/admin/reset` | Start a rehearsal over without restarting: closes active listings (like simulate-expiry), then clears items, requests, matches, and listings; ids restart at `0001`. Events are kept. Returns `{"reset": true, "closed_listings": ["itm_0001", ...]}`; `409` while an item is being listed |
 | `POST` | `/api/admin/seed` | Load the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` if it was already loaded (no duplicates) |
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
