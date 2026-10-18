@@ -45,6 +45,7 @@ rehome/
 │   │       ├── requests.py
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
+│   │       ├── pages.py    ← HTML listing previews at /listings
 │   │       └── events.py
 │   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
@@ -168,6 +169,8 @@ cloudflared tunnel --url http://localhost:8000  # leave running; prints https://
 **No tunnel, seeded items only:** once the GitHub repo is public, set `SEED_IMAGE_BASE_URL=https://raw.githubusercontent.com/shuja-waraich-03/HackGB/<branch>/rehome/backend/static/seed` in `.env` (the branch must contain those photos). Seeded items then use photos hosted by GitHub. Photos donated during the demo still need the tunnel.
 
 **With a tunnel:** put the tunnel URL in `.env` as `PUBLIC_BASE_URL=https://<random>.trycloudflare.com`, restart the backend, seed, then list. Keep the backend and the tunnel running while people view the listings: Shopstr loads the photo from your laptop. Relisting an item replaces its old listing (same `d` tag). If a live listing goes out without a public photo, the activity feed says so.
+
+**See your listings:** open http://localhost:8000/listings for a storefront of everything listed (photos, prices, live/dry-run badges), or `http://localhost:8000/listings/<item_id>` for one listing with links to Shopstr and to njump.me (a plain Nostr viewer that works even when Shopstr's site is down). Your frontend can build the same cards from `GET /api/listings`, which includes each listing's item.
 
 ## AI tools and APIs used
 

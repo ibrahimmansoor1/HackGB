@@ -139,6 +139,7 @@ No request body.
     "listed_at": "2026-10-18T14:05:00Z",
     "expires_at": "2026-11-17T14:05:00Z",
     "url": "https://shopstr.store/listing/naddr1...",
+    "nostr_url": "https://njump.me/naddr1...",
     "status": "active",
     "dry_run": false,
     "relays_accepted": ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]
@@ -162,4 +163,8 @@ No request body. Every `active` listing becomes `expired`; each item still `list
 
 ### `GET /api/listings`
 
-**Response `200`:** `{ "listings": [ Listing, ... ] }` (same shape as `listing` above)
+**Response `200`:** `{ "listings": [ Listing, ... ] }`, newest first. Each is the `listing` shape above **plus `item`** (the full Item object), so a frontend can render a card (photo, title, price) from one call.
+
+### Preview pages (HTML, not JSON)
+
+`GET /listings` (every listing as cards) and `GET /listings/{item_id}` (one item's latest listing: photo, price, status badge, links to Shopstr and njump). Served by the backend for the demo screen, so it doesn't depend on Shopstr's site. `404` if the item was never listed.

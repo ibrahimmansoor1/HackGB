@@ -71,8 +71,14 @@ def main() -> int:
           f"${listing.get('price')} dry_run={listing.get('dry_run')} {listing.get('url', r.text)[:70]}")
 
     r = c.get("/api/listings", params={"status": "active"})
-    check("GET  /api/listings?status=active", r.status_code == 200 and
-          target in [x["item_id"] for x in r.json()["listings"]])
+    rows = r.json()["listings"] if r.status_code == 200 else []
+    check("GET  /api/listings?status=active", target in [x["item_id"] for x in rows]
+          and all("item" in x and x.get("nostr_url") for x in rows))
+
+    r = c.get(f"/listings/{target}")
+    check(f"GET  /listings/{target} (preview page)",
+          r.status_code == 200 and "text/html" in r.headers.get("content-type", ""),
+          f"{BASE}/listings/{target}")
 
     r = c.post("/api/admin/simulate-expiry")
     check("POST /api/admin/simulate-expiry", r.status_code == 200 and target in r.json()["expired"],

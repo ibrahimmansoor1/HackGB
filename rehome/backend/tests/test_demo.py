@@ -356,3 +356,41 @@ def test_seed_image_base_url_overrides_seed_photos(monkeypatch):
     item = client.get("/api/items").json()["items"][0]
     assert item["image_url"] == f"{base}/puffer-jacket.png"
     assert marketplace.has_public_image(item)
+
+
+# ---- listing cards + preview pages -------------------------------------------
+def test_listings_carry_item_and_nostr_link():
+    client.post("/api/admin/seed")
+    item_id = client.get("/api/items").json()["items"][0]["id"]
+    listing = client.post(f"/api/items/{item_id}/list").json()["listing"]
+    naddr = listing["url"].rsplit("/", 1)[1]
+    assert listing["nostr_url"] == f"https://njump.me/{naddr}"
+    rows = client.get("/api/listings").json()["listings"]
+    assert rows[0]["item_id"] == item_id
+    assert rows[0]["item"]["id"] == item_id and rows[0]["item"]["image_url"]
+    assert "embedding" not in rows[0]["item"]
+
+
+def test_preview_pages():
+    assert "Nothing listed yet" in client.get("/listings").text
+    client.post("/api/admin/seed")
+    item = client.get("/api/items").json()["items"][0]
+    client.post(f"/api/items/{item['id']}/list")
+    shop = client.get("/listings")
+    assert shop.status_code == 200 and "text/html" in shop.headers["content-type"]
+    assert "Black puffer jacket, size M" in shop.text and "$25" in shop.text
+    assert "Dry run" in shop.text and item["image_url"] in shop.text
+    page = client.get(f"/listings/{item['id']}")
+    assert page.status_code == 200 and "insulated" in page.text
+    client.post("/api/admin/simulate-expiry")
+    assert "Expired" in client.get(f"/listings/{item['id']}").text
+    assert client.get("/listings/itm_nope").status_code == 404
+
+
+def test_preview_page_escapes_html():
+    r = client.post("/api/items", data={"zip": "54301",
+                                        "note": "<script>alert(1)</script> black jacket"})
+    item_id = r.json()["id"]
+    client.post(f"/api/items/{item_id}/list")
+    page = client.get(f"/listings/{item_id}").text
+    assert "<script>alert(1)</script>" not in page

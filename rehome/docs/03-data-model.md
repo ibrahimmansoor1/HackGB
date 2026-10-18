@@ -87,6 +87,7 @@ Works as SQL tables or as document collections. If the sponsor DB is document/ve
 | listed_at | timestamp | orchestrator | = the event's `published_at` |
 | expires_at | timestamp | orchestrator | `listed_at + 30 days` |
 | url | string | orchestrator | public link, `https://shopstr.store/listing/<naddr>` |
+| nostr_url | string | orchestrator | `https://njump.me/<naddr>`: plain Nostr viewer, works even when Shopstr's site is down |
 | status | string | orchestrator | `active` · `expired` |
 | dry_run | bool | orchestrator | `true` = signed locally, never sent to relays |
 | relays_accepted | string[] | orchestrator | relays that stored the event (`[]` in dry run) |
