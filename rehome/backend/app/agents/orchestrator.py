@@ -56,8 +56,8 @@ def items(status: str | None = None) -> list[Item]:
     return [_public(r) for r in db.list_items(status)]
 
 
-def events(after: int = 0) -> list[AgentEvent]:
-    return [AgentEvent.model_validate(e) for e in db.list_events(after)]
+def events(after: int = 0, run_id: str | None = None) -> list[AgentEvent]:
+    return [AgentEvent.model_validate(e) for e in db.list_events(after, run_id=run_id)]
 
 
 IMPACT_TOTALS = {"item_parsed": "items_parsed", "item_donated": "items_donated",

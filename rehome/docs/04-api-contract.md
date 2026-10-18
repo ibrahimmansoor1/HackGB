@@ -119,6 +119,7 @@ Hands the draft to the **concierge agent** (docs/05): it prices the item, checks
 **Response `200`:**
 ```json
 {
+  "run_id": "run_3f9c2a1b7e",
   "draft_id": "drf_0007",
   "action": "donated",
   "item_id": "itm_0142",
@@ -227,7 +228,7 @@ Exchange method is undecided; for now `handoff.method` is always `"pickup"` and 
 
 ## `GET /api/events?after=<id>` — activity feed
 
-Poll every ~1 s. Returns events with `id > after`, oldest first, max 50.
+Poll every ~1 s. Returns events with `id > after`, oldest first, max 50. Add `run_id=<run_…>` to get only one agent run's steps (the `run_id` comes back from `/handle`). Agent-run events also carry `run_id`, `tool`, `duration_ms`, and `data` (see docs/03); they're `null` elsewhere.
 
 **Response `200`:**
 ```json

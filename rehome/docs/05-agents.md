@@ -8,7 +8,7 @@ Two kinds of agents:
 | Agent | Kind | Model | Provider |
 |---|---|---|---|
 | **Concierge** | agent loop, tool calling | text LLM | **Modal** (`infra/modal_llm.py`) via LangGraph |
-| Input parser | specialist | vision LLM | **Gemini API** |
+| Input parser | specialist | vision LLM | **Gemini API** (Modal's GLM-5.3-Flash until a Gemini key is set) |
 | Pricing | specialist | text LLM | **Modal** |
 | Requester | specialist | text LLM | **Modal** |
 | Matchmaker | specialist (vector search + rules) | embeddings | **Modal** / Tiger pgvector |

@@ -12,6 +12,8 @@ MODAL_VISION_MODEL = os.getenv("MODAL_VISION_MODEL", "")
 MODAL_EMBED_MODEL = os.getenv("MODAL_EMBED_MODEL", "")
 # Tool-calling model for the concierge agent (infra/modal_llm.py serves it as "llm").
 MODAL_AGENT_MODEL = os.getenv("MODAL_AGENT_MODEL", "").strip() or MODAL_VISION_MODEL
+# GLM-5.3 always thinks first; "low" keeps agent steps fast. Blank = model default.
+MODAL_REASONING_EFFORT = os.getenv("MODAL_REASONING_EFFORT", "low").strip()
 # Input parser (vision). Blank key = stub parser, independent of Modal.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()

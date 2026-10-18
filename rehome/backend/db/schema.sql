@@ -105,6 +105,13 @@ CREATE TABLE IF NOT EXISTS events (
 );
 SELECT create_hypertable('events', by_range('time'), if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS events_id_idx ON events (id);
+-- Agent tracing: one concierge run shares a run_id; tool steps carry the tool
+-- name, how long it took, and its result. ADD COLUMN so older DBs upgrade in place.
+ALTER TABLE events ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS tool TEXT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS duration_ms INT;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS data JSONB;
+CREATE INDEX IF NOT EXISTS events_run_idx ON events (run_id, id) WHERE run_id IS NOT NULL;
 
 -- Live impact stats. materialized_only = false so the dashboard also sees
 -- events newer than the last refresh (real-time aggregation).

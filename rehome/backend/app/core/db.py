@@ -175,8 +175,9 @@ def insert_event(row: dict) -> dict:
     return row
 
 
-def list_events(after: int = 0, limit: int = 50) -> list[dict]:
-    return [e for e in _events if e["id"] > after][:limit]
+def list_events(after: int = 0, limit: int = 50, run_id: str | None = None) -> list[dict]:
+    return [e for e in _events
+            if e["id"] > after and (run_id is None or e.get("run_id") == run_id)][:limit]
 
 
 def impact_rows() -> list[dict]:

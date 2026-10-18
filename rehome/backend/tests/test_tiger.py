@@ -194,6 +194,15 @@ def test_events_feed_order_and_fields(pg):
     assert pg.list_events(after=b["id"]) == []
 
 
+def test_agent_trace_columns(pg):
+    pg.insert_event({"agent": "concierge", "message": "← $15–23", "run_id": "run_t1",
+                     "tool": "get_price_quote", "duration_ms": 812,
+                     "data": {"low": 15, "high": 23}, "created_at": pg.now()})
+    pg.insert_event({"agent": "orchestrator", "message": "untraced", "created_at": pg.now()})
+    [e] = pg.list_events(run_id="run_t1")
+    assert (e["tool"], e["duration_ms"], e["data"]) == ("get_price_quote", 812, {"low": 15, "high": 23})
+
+
 def test_listing_nostr_url_roundtrip(pg):
     item_id = _item(pg, _vec(6))
     lst_id = pg.new_listing_id()

@@ -24,26 +24,32 @@ def _strip_fences(text: str) -> str:
     return re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
 
 
+def modal_extra_body() -> dict:
+    """Per-request vLLM options for the Modal model (reasoning effort for GLM)."""
+    effort = config.MODAL_REASONING_EFFORT
+    return {"chat_template_kwargs": {"reasoning_effort": effort}} if effort else {}
+
+
 async def complete_json(system: str, user_text: str,
-                        image_bytes: bytes | None = None,
-                        image_mime: str = "image/jpeg") -> dict | list:
-    """Call the model and parse its JSON reply."""
+                        images: list[tuple[bytes, str]] | None = None) -> dict | list:
+    """Call the Modal model with text + (bytes, mime) images; parse its JSON reply."""
     content: list[dict] = [{"type": "text", "text": user_text}]
-    if image_bytes:
-        b64 = base64.b64encode(image_bytes).decode()
-        content.append({"type": "image_url",
-                        "image_url": {"url": f"data:{image_mime};base64,{b64}"}})
+    for data, mime in images or []:
+        b64 = base64.b64encode(data).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
     payload = {
         "model": config.MODAL_VISION_MODEL,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": content}],
         "temperature": 0.2,
+        "max_tokens": 4096,           # room for the reasoning before the JSON
+        **modal_extra_body(),
     }
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=180) as client:   # cold starts take a while
         r = await client.post(f"{config.MODAL_ENDPOINT_URL}/chat/completions",
                               json=payload, headers=_headers())
         r.raise_for_status()
-    text = r.json()["choices"][0]["message"]["content"]
+    text = r.json()["choices"][0]["message"]["content"] or ""
     return json.loads(_strip_fences(text))
 
 
