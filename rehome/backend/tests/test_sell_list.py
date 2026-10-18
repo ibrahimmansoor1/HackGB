@@ -79,3 +79,30 @@ def test_item_list_accepts_a_price_too():
     item_id = client.get("/api/items?status=available").json()["items"][0]["id"]
     r = client.post(f"/api/items/{item_id}/list", json={"price": 12.5})
     assert r.status_code == 200 and r.json()["listing"]["price"] == 12.5
+
+
+def test_post_uses_the_pricing_agents_title_and_description():
+    draft_id = _draft()
+    sell = client.post(f"/api/items/{draft_id}/sell").json()
+    draft = sell["listing_draft"]
+    r = client.post(f"/api/items/{draft_id}/post", json={
+        "price": sell["suggested_price"]["low"],
+        "title": draft["title"], "description": draft["description"]})
+    assert r.status_code == 201, r.text
+    listing = r.json()["listing"]
+    assert listing["title"] == draft["title"]
+    assert listing["description"] == draft["description"]
+    shown = client.get("/api/listings").json()["listings"]
+    assert any(x["title"] == draft["title"] for x in shown)
+
+
+def test_listing_event_carries_the_agents_text():
+    item = {"id": "itm_t1", "item": "jacket", "color": "black", "summary": "A jacket.",
+            "category": "outerwear", "condition": "good", "attributes": []}
+    ev = marketplace.build_listing_event(item, 20, title="North Face Puffer, Size M",
+                                         description="Warm, barely worn puffer.")
+    tags = {t[0]: t[1] for t in marketplace._tags(ev)}
+    assert tags["title"] == "North Face Puffer, Size M"
+    assert ev.content().startswith("Warm, barely worn puffer.")
+    plain = marketplace.build_listing_event(item, 20)
+    assert {t[0]: t[1] for t in marketplace._tags(plain)}["title"] == "Black jacket"

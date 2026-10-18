@@ -80,6 +80,8 @@ def _img(lst: ListingWithItem) -> str:
 
 
 def _title(lst: ListingWithItem) -> str:
+    if lst.title:   # as posted (the pricing agent's listing_draft)
+        return lst.title
     it = lst.item
     name = f"{it.color} {it.item}".strip()
     return name[:1].upper() + name[1:] + (f", size {it.size}" if it.size else "")
@@ -126,7 +128,7 @@ async def listing_page(item_id: str):
     <div class="price">${lst.price:g} <span class="meta">USD</span></div>
     <div class="meta">{escape(it.condition)} · {escape(it.category)} · zip {escape(it.zip)}</div>
     <div class="chips">{chips}</div>
-    <p class="desc">{escape(it.summary)}</p>
+    <p class="desc">{escape(lst.description or it.summary)}</p>
     <p class="meta">Buying secondhand keeps this out of a landfill. If it doesn't sell in
       30 days, Rehome gives it free to a neighbor who needs it.</p>
     <div class="meta">Listed {lst.listed_at:%b %d, %Y %H:%M} UTC · expires

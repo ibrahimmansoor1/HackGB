@@ -85,6 +85,10 @@ class DonateOut(BaseModel):
 
 class PostIn(BaseModel):
     price: Optional[float] = None   # USD; default = category x condition heuristic
+    # The pricing agent's listing_draft (from /sell), edited or not. Posted as
+    # the marketplace title and description; default = template from the item.
+    title: Optional[str] = Field(None, max_length=80)
+    description: Optional[str] = Field(None, max_length=2000)
 
 
 class Price(BaseModel):
@@ -202,6 +206,8 @@ class Listing(BaseModel):
     nostr_url: str            # njump.me page: raw listing, works when Shopstr is down
     status: Literal["active", "expired"]
     dry_run: bool
+    title: Optional[str] = None        # as posted (the pricing agent's listing_draft)
+    description: Optional[str] = None
     relays_accepted: list[str] = Field(default_factory=list)
 
 

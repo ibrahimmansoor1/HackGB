@@ -136,7 +136,9 @@ async def _act(run: _Run, action: str, price: float | None = None) -> str:
     try:
         if action == "listed":
             t = _start(run, name, f"→ marketplace: list it on Shopstr for ${price:g}")
-            run.result = await orchestrator.post_draft(run.draft_id, price)
+            ld = run.quote.listing_draft if run.quote else None
+            run.result = await orchestrator.post_draft(run.draft_id, price, ld and ld.title,
+                                                       ld and ld.description)
             return _done(run, name, t, "concierge",
                          f"listed {run.result.item.id} for ${run.result.listing.price:g}",
                          {"listed": True, "item_id": run.result.item.id,

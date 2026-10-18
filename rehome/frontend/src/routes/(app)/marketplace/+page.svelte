@@ -50,6 +50,10 @@
   {#each listings as listing (listing.id)}
     <div class:opacity-60={listing.status === 'expired'}>
       <ItemTag item={listing.item} />
+      {#if listing.title}
+        <p class="mt-3 font-semibold">{listing.title}</p>
+        <p class="text-sm text-ink-soft">{listing.description}</p>
+      {/if}
       <div class="mt-3"><ListingInfo {listing} /></div>
     </div>
   {/each}

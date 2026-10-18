@@ -139,13 +139,11 @@ Hands the draft to the **concierge agent** (docs/05): it prices the item, checks
 
 ## `POST /api/items/{draft_id}/post` — list a draft for sale
 
-**Request** (optional): `{ "price": 45 }`. Without a price, the category × condition heuristic is used.
+**Request** (all optional): `{ "price": 45, "title": "...", "description": "..." }`. Without a price, the category × condition heuristic is used. `title` (≤ 80) and `description` (≤ 2000) are what the listing shows on Shopstr: send the `listing_draft` from `/sell` (edited or not). Without them the title/description are built from the item. The listing in the response (and in `GET /api/listings`) carries the posted `title` and `description`.
 
 **Response `201`:** same as `POST /api/items/{id}/list` (`{item, listing}`). The draft becomes an item and is listed (`listed`); unsold after 30 days, the expiry rule puts it in the donation pool. Doesn't count as `item_donated`.
 
-**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
-
-**Errors:** `404` unknown, expired, or already-used draft.
+**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 or title/description too long · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
 
 ---
 

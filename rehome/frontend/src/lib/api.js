@@ -35,11 +35,16 @@ export async function sellDraft(draftId) {
   return handle(await fetch(`${BASE}/api/items/${draftId}/sell`, { method: 'POST' }));
 }
 
-/** S6: list a draft for sale on Shopstr at `price` (category default if omitted).
+/** S6: list a draft for sale on Shopstr at `price` (category default if omitted),
+ *  posting `title`/`description` (the /sell quote's listing_draft; template if omitted).
  *  Returns { item, listing }. */
-export async function postDraft(draftId, price) {
+export async function postDraft(draftId, price, { title, description } = {}) {
+  const body = {};
+  if (price) body.price = price;
+  if (title?.trim()) body.title = title.trim();
+  if (description?.trim()) body.description = description.trim();
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(price ? { price } : {}) };
+    body: JSON.stringify(body) };
   return handle(await fetch(`${BASE}/api/items/${encodeURIComponent(draftId)}/post`, init));
 }
 

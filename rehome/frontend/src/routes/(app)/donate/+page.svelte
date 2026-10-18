@@ -15,6 +15,8 @@
   let donated = $state(null);
   let quote = $state(null);
   let price = $state(null);
+  let title = $state('');         // pricing agent's listing_draft, editable before posting
+  let description = $state('');
   let sold = $state(null);   // { item, listing } once it's listed
   let handled = $state(null);
 
@@ -48,12 +50,16 @@
       quote = await sellDraft(draft.draft_id);
       const p = quote.suggested_price;
       price = Math.round((p.low + p.high) / 2);
+      title = quote.listing_draft.title;
+      description = quote.listing_draft.description;
     });
   }
 
   function list() {
     if (!(price > 0)) { error = 'Pick a price above $0.'; return; }
-    run('Listing on Shopstr…', async () => { sold = await postDraft(draft.draft_id, price); });
+    run('Listing on Shopstr…', async () => {
+      sold = await postDraft(draft.draft_id, price, { title, description });
+    });
   }
 
   function donate() {
@@ -97,6 +103,9 @@
     <button onclick={startOver}>Give something else</button>
   {:else if sold}
     <h2>For sale</h2>
+    {#if sold.listing.title}
+      <p><strong>{sold.listing.title}</strong><br />{sold.listing.description}</p>
+    {/if}
     <ListingInfo listing={sold.listing} />
     <p class="text-sm text-ink-soft">If it doesn't sell in 30 days, it goes back to the donation pool.
       See all listings on the <a class="underline" href="/marketplace">marketplace</a>.</p>
@@ -117,7 +126,10 @@
           {/each}
         </ul>
       {/if}
-      <p><strong>{quote.listing_draft.title}</strong><br />{quote.listing_draft.description}</p>
+      <label for="title">Listing title</label>
+      <input id="title" maxlength="80" bind:value={title} />
+      <label for="description">Description</label>
+      <textarea id="description" rows="4" maxlength="2000" bind:value={description}></textarea>
 
       <label for="price">Your price (USD)</label>
       <input id="price" type="number" min="1" step="1" bind:value={price} class="!w-32" />

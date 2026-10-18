@@ -74,7 +74,8 @@ async def handle_draft(draft_id: str, body: HandleIn | None = None):
 @router.post("/{draft_id}/post", response_model=ListItemOut, status_code=201)
 async def post_draft(draft_id: str, body: PostIn | None = None):
     try:
-        return await orchestrator.post_draft(draft_id, body.price if body else None)
+        body = body or PostIn()
+        return await orchestrator.post_draft(draft_id, body.price, body.title, body.description)
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)
 

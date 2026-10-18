@@ -60,10 +60,11 @@ def _title(item: dict) -> str:
     return title[:80]
 
 
-def _content(item: dict) -> str:
+def _content(item: dict, description: str | None = None) -> str:
     lines = []
-    if item.get("summary"):
-        lines += [item["summary"], ""]
+    text = (description or "").strip() or item.get("summary")
+    if text:
+        lines += [text, ""]
     details = [("Condition", item.get("condition")), ("Size", item.get("size")),
                ("Color", item.get("color")), ("Season", item.get("season")),
                ("Features", ", ".join(item.get("attributes") or []))]
@@ -97,20 +98,24 @@ def has_public_image(item: dict) -> bool:
 
 def build_listing_event(item: dict, price: int | float, status: str = "active",
                         published_at: int | None = None, keys: Keys | None = None,
-                        created_at: int | None = None):
+                        created_at: int | None = None, title: str | None = None,
+                        description: str | None = None):
     """Signed NIP-99 event for one item. Pure: no network, no DB.
 
-    Reads only catalog fields; donor_id, note, and other personal data never
-    leave the server. `d` = item id, so republishing replaces the listing."""
+    `title`/`description` are the pricing agent's listing_draft; without them
+    the title and content are built from the item's catalog fields. Reads only
+    catalog fields; donor_id, note, and other personal data never leave the
+    server. `d` = item id, so republishing replaces the listing."""
     if status not in ("active", "sold"):
         raise ValueError(f"status must be active or sold, not {status!r}")
     keys = keys or _signing_keys()
     published = published_at or Timestamp.now().as_secs()
     amount = f"{price:g}" if isinstance(price, float) else str(price)
 
+    title = (title or "").strip()[:80] or _title(item)
     tags = [["d", item["id"]],
-            ["title", _title(item)],
-            ["summary", item.get("summary") or _title(item)],
+            ["title", title],
+            ["summary", item.get("summary") or title],
             ["price", amount, CURRENCY],
             ["published_at", str(published)],
             ["status", status]]
@@ -126,7 +131,7 @@ def build_listing_event(item: dict, price: int | float, status: str = "active",
     if _is_public_image(item.get("image_url")):
         tags.append(["image", item["image_url"]])
 
-    builder = EventBuilder(Kind(KIND_LISTING), _content(item)).tags(
+    builder = EventBuilder(Kind(KIND_LISTING), _content(item, description)).tags(
         [Tag.parse(t) for t in tags])
     if created_at:
         builder = builder.custom_created_at(Timestamp.from_secs(created_at))
@@ -237,11 +242,12 @@ _last_created: dict[str, int] = {}
 
 
 async def _publish(item: dict, price: int | float, status: str,
-                   published_at: int | None = None, created_at: int | None = None) -> dict:
+                   published_at: int | None = None, created_at: int | None = None,
+                   title: str | None = None, description: str | None = None) -> dict:
     created = max(created_at or Timestamp.now().as_secs(), _last_created.get(item["id"], 0) + 1)
     _last_created[item["id"]] = created
     ev = build_listing_event(item, price, status, published_at=published_at,
-                             created_at=created)
+                             created_at=created, title=title, description=description)
     relays = list(config.NOSTR_RELAYS)
     live = is_live()
     if live:
@@ -257,21 +263,27 @@ async def _publish(item: dict, price: int | float, status: str,
             "url": SHOPSTR_LISTING_URL.format(naddr=naddr),
             "nostr_url": NJUMP_URL.format(naddr=naddr),
             "published_at": int(next(t[1] for t in _tags(ev) if t[0] == "published_at")),
+            "title": next(t[1] for t in _tags(ev) if t[0] == "title"),
+            "description": (description or "").strip() or item.get("summary") or "",
             "dry_run": not live}
 
 
-async def publish_listing(item: dict, price: int | float) -> dict:
+async def publish_listing(item: dict, price: int | float, title: str | None = None,
+                          description: str | None = None) -> dict:
     """Post a new active listing. Returns {event_id, npub, relays_accepted,
-    relays_failed, relay_errors, url, nostr_url, published_at, dry_run}."""
-    return await _publish(item, price, "active")
+    relays_failed, relay_errors, url, nostr_url, published_at, title,
+    description, dry_run}; title/description are what was posted."""
+    return await _publish(item, price, "active", title=title, description=description)
 
 
-async def mark_sold(item: dict, price: int | float, published_at: int | None = None) -> dict:
+async def mark_sold(item: dict, price: int | float, published_at: int | None = None,
+                    title: str | None = None, description: str | None = None) -> dict:
     """Republish the same `d` tag with status=sold so clients drop it from
     active listings. Pass the original published_at to keep NIP-99 semantics."""
     # Replaceable events: the newer created_at wins, so never tie the original.
     created = max(Timestamp.now().as_secs(), (published_at or 0) + 1)
-    return await _publish(item, price, "sold", published_at=published_at, created_at=created)
+    return await _publish(item, price, "sold", published_at=published_at, created_at=created,
+                          title=title, description=description)
 
 
 # ---- channel interface -----------------------------------------------------
@@ -279,21 +291,22 @@ class Channel(Protocol):
     platform: str   # stored in listings.platform
     label: str      # shown in the activity feed
 
-    async def publish(self, item: dict, price: int | float) -> dict: ...
+    async def publish(self, item: dict, price: int | float, title: str | None = None,
+                      description: str | None = None) -> dict: ...
 
-    async def mark_sold(self, item: dict, price: int | float,
-                        published_at: int | None = None) -> dict: ...
+    async def mark_sold(self, item: dict, price: int | float, published_at: int | None = None,
+                        title: str | None = None, description: str | None = None) -> dict: ...
 
 
 class NostrChannel:
     platform = "nostr"
     label = "Shopstr"
 
-    async def publish(self, item, price):
-        return await publish_listing(item, price)
+    async def publish(self, item, price, title=None, description=None):
+        return await publish_listing(item, price, title, description)
 
-    async def mark_sold(self, item, price, published_at=None):
-        return await mark_sold(item, price, published_at)
+    async def mark_sold(self, item, price, published_at=None, title=None, description=None):
+        return await mark_sold(item, price, published_at, title, description)
 
 
 # Roadmap: "ebay": EbayChannel(), "etsy": ..., "shopify": ...
