@@ -214,6 +214,7 @@ Every step emits an event (activity feed + Tiger hypertable). `event_type` is se
 | Matched | orchestrator | `match_made` | Top match itm_0142 (0.89) |
 | No match | orchestrator | – | No good match yet; request left open |
 | Accepted | orchestrator | `match_accepted` | itm_0142 reserved; donor notified, pickup in 54311 |
+| Priced for listing *(stretch)* | orchestrator | – | Priced itm_0142 at $25 (outerwear, like new) |
 | Listed *(stretch)* | orchestrator | – | Listed itm_0142 on Shopstr — 3/3 relays · or · Listed itm_0142 on Shopstr (dry run) |
 | No public photo *(stretch)* | orchestrator | – | Heads up: itm_0142 has no public photo, so Shopstr hides it. Set PUBLIC_BASE_URL to a public URL (e.g. a tunnel) and relist |
 | Listing failed *(stretch)* | orchestrator | – | Couldn't list itm_0142 on Shopstr — 0/3 relays accepted; item stays available |

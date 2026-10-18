@@ -16,7 +16,7 @@ ITEM_COLS = ["id", "donor_id", "image_url", "note", "zip", "category", "item", "
 REQUEST_COLS = ["id", "requester_id", "raw_text", "zip", "needs", "inferred_context",
                 "must_have", "nice_to_have", "size", "search_text", "status", "created_at"]
 LISTING_COLS = ["id", "item_id", "platform", "external_id", "price", "listed_at",
-                "expires_at", "url", "status", "dry_run", "relays_accepted"]
+                "expires_at", "url", "nostr_url", "status", "dry_run", "relays_accepted"]
 _ITEM_SELECT = ", ".join(ITEM_COLS)
 
 _pool: ConnectionPool | None = None
@@ -65,6 +65,15 @@ def _insert(table: str, cols: list[str], row: dict, extra: dict | None = None) -
         marks.append(expr)
         values.append(value)
     _run(f"INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join(marks)})", values)
+
+
+def reset() -> None:
+    """Empty the demo inventory and restart its ids at 0001 (POST /api/admin/reset).
+    Events are kept: nothing references them, and the feed polls by id."""
+    with _db().connection() as conn:
+        conn.execute("TRUNCATE matches, listings, requests, items")
+        for seq in ("item_seq", "request_seq", "match_seq", "listing_seq"):
+            conn.execute(f"ALTER SEQUENCE {seq} RESTART WITH 1")
 
 
 def now() -> datetime:

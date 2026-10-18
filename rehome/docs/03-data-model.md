@@ -31,7 +31,7 @@ Database: **Tiger Data** (managed Postgres + TimescaleDB). pgvector does matchin
 |---|---|---|---|
 | id | string PK | orchestrator | `itm_xxxx` |
 | donor_id | string | app | |
-| image_url | string \| null | orchestrator | absolute URL: `PUBLIC_BASE_URL` + `/static/uploads/<id>.<ext>` (or `/static/seed/<name>.png` for demo items); `null` if no photo |
+| image_url | string \| null | orchestrator | absolute URL: `PUBLIC_BASE_URL` + `/static/uploads/<id>.<ext>` (demo items: `SEED_IMAGE_BASE_URL/<name>.png` if set, else `/static/seed/<name>.png`); `null` if no photo |
 | note | string \| null | app | donor's free text |
 | zip | string | app | pickup zip |
 | category | string | parser | see `05-agents.md` |
@@ -110,6 +110,7 @@ Database: **Tiger Data** (managed Postgres + TimescaleDB). pgvector does matchin
 | listed_at | timestamptz | orchestrator | = the event's `published_at` |
 | expires_at | timestamptz | orchestrator | `listed_at + 30 days` |
 | url | string | orchestrator | `https://shopstr.store/listing/<naddr>` |
+| nostr_url | string | orchestrator | `https://njump.me/<naddr>`: plain Nostr viewer, works even when Shopstr's site is down |
 | status | string | orchestrator | `active` · `expired` |
 | dry_run | bool | orchestrator | `true` = signed locally, never sent to relays |
 | relays_accepted | string[] | orchestrator | relays that stored the event (`[]` in dry run) |

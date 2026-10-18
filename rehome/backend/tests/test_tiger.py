@@ -32,7 +32,7 @@ def pg():
         conn.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
         conn.execute(f"CREATE SCHEMA {SCHEMA}")
         conn.execute(f"SET search_path = {SCHEMA}, public")
-        sql = Path(SQL_FILE).read_text().replace("{EMBED_DIM}", str(DIM))
+        sql = Path(SQL_FILE).read_text(encoding="utf-8").replace("{EMBED_DIM}", str(DIM))
         for stmt in statements(sql):
             # Plain Postgres (no TimescaleDB) can still test everything else.
             if not has_timescale and ("timescale" in stmt or "hypertable" in stmt
@@ -201,3 +201,29 @@ def test_agent_trace_columns(pg):
     pg.insert_event({"agent": "orchestrator", "message": "untraced", "created_at": pg.now()})
     [e] = pg.list_events(run_id="run_t1")
     assert (e["tool"], e["duration_ms"], e["data"]) == ("get_price_quote", 812, {"low": 15, "high": 23})
+
+
+def test_listing_nostr_url_roundtrip(pg):
+    item_id = _item(pg, _vec(6))
+    lst_id = pg.new_listing_id()
+    now = pg.now()
+    pg.insert_listing({"id": lst_id, "item_id": item_id, "platform": "nostr",
+                       "external_id": "cd", "price": 25.0, "listed_at": now,
+                       "expires_at": now, "url": "https://shopstr.store/listing/naddr1x",
+                       "nostr_url": "https://njump.me/naddr1x", "status": "active",
+                       "dry_run": False, "relays_accepted": ["wss://relay.damus.io"]})
+    row = {r["id"]: r for r in pg.list_listings()}[lst_id]
+    assert row["nostr_url"] == "https://njump.me/naddr1x"
+    assert row["relays_accepted"] == ["wss://relay.damus.io"]
+
+
+def test_reset_clears_inventory_keeps_events(pg):
+    """Keep this test last in the file: it empties the module's tables."""
+    item_id = _item(pg, _vec(7))
+    ev = pg.insert_event({"agent": "orchestrator", "message": "before reset",
+                          "created_at": pg.now()})
+    pg.reset()
+    assert pg.get_item(item_id) is None and pg.list_items() == []
+    assert pg.list_listings() == []
+    assert pg.new_item_id() == "itm_0001" and pg.new_listing_id() == "lst_0001"
+    assert [e["message"] for e in pg.list_events(after=ev["id"] - 1)][0] == "before reset"

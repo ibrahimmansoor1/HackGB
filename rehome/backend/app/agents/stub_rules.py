@@ -73,7 +73,7 @@ HOT_PLACES = ["phoenix", "arizona", "miami", "florida", "texas", "houston", "las
 COLD_MONTHS = ["november", "december", "january", "february", "march"]
 HOT_MONTHS = ["june", "july", "august"]
 COLD_WORDS = ["winter", "snow", "cold", "freezing", "blizzard", "ice", "icy"]
-HOT_WORDS = ["summer", "heat", "hot", "humid"]
+HOT_WORDS = ["summer", "hot", "humid"]   # not "heat": here it means home heating
 RAIN_WORDS = ["rain", "rainy", "wet", "storm"]
 # Zip prefixes with real winters: Chicago, Wisconsin, Minnesota, Michigan, Boston.
 COLD_ZIP_PREFIXES = ("600", "601", "602", "603", "604", "605", "606", "607", "608",
@@ -122,11 +122,18 @@ def item_phrase(text: str) -> tuple[str | None, str | None]:
 
 def find_size(text: str) -> str | None:
     """Only sizes the person actually stated. Never guesses."""
-    m = re.search(r"\bsize\s*:?\s*([a-z0-9.]+(?:/[a-z0-9.]+)?)\b", text, re.I)
+    m = re.search(r"\bsize\b\s*:?\s*([a-z0-9.]+(?:/[a-z0-9.]+)?)\b", text, re.I)
     if m:
         size = m.group(1)
         words = {"small": "S", "medium": "M", "large": "L", "xlarge": "XL"}
-        return words.get(size.lower(), size.upper() if size.isalpha() else size)
+        letters = {"xxs", "xs", "s", "m", "l", "xl", "xxl", "xxxl"}
+        if size.lower() in words:
+            return words[size.lower()]
+        if size.lower() in letters:
+            return size.upper()
+        if any(ch.isdigit() for ch in size):
+            return size
+        # "one size fits all", "size and fit": not a stated size; fall through
     m = re.search(r"\b(XXS|XS|XXL|XL|XXXL|\d{1,2}T)\b", text)
     return m.group(1) if m else None
 
@@ -244,10 +251,13 @@ CLIMATE_NEED_PREFIX = {"cold": "winter", "rain": "rain", "hot": "summer"}
 
 def climate(text: str, zip_code: str) -> str | None:
     low = text.lower()
-    if any(_has(low, m) for m in HOT_MONTHS) or any(_has(low, w) for w in HOT_WORDS):
+    # Month first (Chicago in July is summer), then explicit cold, then hot words.
+    if any(_has(low, m) for m in HOT_MONTHS):
         return "hot"
     if any(_has(low, m) for m in COLD_MONTHS) or any(_has(low, w) for w in COLD_WORDS):
         return "cold"
+    if any(_has(low, w) for w in HOT_WORDS):
+        return "hot"
     if any(_has(low, w) for w in RAIN_WORDS) or any(_has(low, p) for p in RAINY_PLACES):
         return "rain"
     if any(_has(low, p) for p in COLD_PLACES):
@@ -274,7 +284,7 @@ def parse_need(text: str, zip_code: str) -> dict:
         context.append("for a child")
     must: list[str] = []
     nice: list[str] = []
-    if clim:
+    if clim and noun_cat not in ("home", "electronics"):   # climate gear is for wearables
         table = NEEDS_BY_CLIMATE[clim]
         must, nice = (list(x) for x in table.get(noun_cat, table.get(cat, table[None])))
     if _has(low, "interview") or _has(low, "job"):

@@ -8,6 +8,7 @@ os.environ["DATABASE_URL"] = ""
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["MODAL_ENDPOINT_URL"] = ""     # stub mode; tests fake model calls explicitly
 os.environ["EBAY_APP_ID"] = os.environ["EBAY_CERT_ID"] = ""
+os.environ["SEED_IMAGE_BASE_URL"] = ""
 os.environ["BRAVE_API_KEY"] = ""
 
 import pytest  # noqa: E402

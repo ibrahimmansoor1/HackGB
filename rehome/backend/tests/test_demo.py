@@ -318,7 +318,7 @@ def test_routers_never_import_the_db():
     """SOURCE_OF_TRUTH rule 1: only the orchestrator touches the database."""
     routers = Path(__file__).resolve().parents[1] / "app" / "routers"
     for f in routers.glob("*.py"):
-        src = f.read_text()
+        src = f.read_text(encoding="utf-8")   # Windows defaults to cp1252
         assert not re.search(r"from app\.core import[^\n]*\bdb\b|import app\.core\.db", src), f.name
 
 
@@ -351,3 +351,114 @@ def test_item_listed_during_reason_call_is_not_matched(monkeypatch):
     listed = {i["id"] for i in client.get("/api/items?status=listed").json()["items"]}
     matched = {m["item_id"] for m in body["matches"]}
     assert listed and matched and not listed & matched
+
+
+def test_seed_image_base_url_overrides_seed_photos(monkeypatch):
+    base = "https://raw.githubusercontent.com/shuja-waraich-03/HackGB/main/rehome/backend/static/seed"
+    monkeypatch.setattr(config, "SEED_IMAGE_BASE_URL", base)
+    client.post("/api/admin/seed")
+    item = client.get("/api/items").json()["items"][0]
+    assert item["image_url"] == f"{base}/puffer-jacket.png"
+    assert marketplace.has_public_image(item)
+
+
+# ---- listing cards + preview pages -------------------------------------------
+def test_listings_carry_item_and_nostr_link():
+    client.post("/api/admin/seed")
+    item_id = client.get("/api/items").json()["items"][0]["id"]
+    listing = client.post(f"/api/items/{item_id}/list").json()["listing"]
+    naddr = listing["url"].rsplit("/", 1)[1]
+    assert listing["nostr_url"] == f"https://njump.me/{naddr}"
+    rows = client.get("/api/listings").json()["listings"]
+    assert rows[0]["item_id"] == item_id
+    assert rows[0]["item"]["id"] == item_id and rows[0]["item"]["image_url"]
+    assert "embedding" not in rows[0]["item"]
+
+
+def test_preview_pages():
+    assert "Nothing listed yet" in client.get("/listings").text
+    client.post("/api/admin/seed")
+    item = client.get("/api/items").json()["items"][0]
+    client.post(f"/api/items/{item['id']}/list")
+    shop = client.get("/listings")
+    assert shop.status_code == 200 and "text/html" in shop.headers["content-type"]
+    assert "Black puffer jacket, size M" in shop.text and "$25" in shop.text
+    assert "Dry run" in shop.text and item["image_url"] in shop.text
+    page = client.get(f"/listings/{item['id']}")
+    assert page.status_code == 200 and "insulated" in page.text
+    client.post("/api/admin/simulate-expiry")
+    assert "Expired" in client.get(f"/listings/{item['id']}").text
+    assert client.get("/listings/itm_nope").status_code == 404
+
+
+def test_preview_page_escapes_html():
+    r = client.post("/api/items", data={"zip": "54301",
+                                        "note": "<script>alert(1)</script> black jacket"})
+    item_id = r.json()["id"]
+    client.post(f"/api/items/{item_id}/list")
+    page = client.get(f"/listings/{item_id}").text
+    assert "<script>alert(1)</script>" not in page
+
+
+# ---- demo reset --------------------------------------------------------------
+def test_reset_clears_inventory_and_reseeds_from_0001():
+    client.post("/api/admin/seed")
+    client.post("/api/requests", json=CHICAGO)
+    listed = client.get("/api/items?status=available").json()["items"][0]["id"]
+    client.post(f"/api/items/{listed}/list")
+    last = _last_event_id()
+
+    r = client.post("/api/admin/reset")
+    assert r.status_code == 200 and r.json() == {"reset": True, "closed_listings": [listed]}
+    assert client.get("/api/items").json()["items"] == []
+    assert client.get("/api/listings").json()["listings"] == []
+    msgs = _messages(after=last)
+    assert f"30 days unsold — {listed} moved to donation pool" in msgs   # closed first
+    assert "Demo reset: inventory, requests, and listings cleared" in msgs
+    assert all(e["id"] > last for e in client.get(f"/api/events?after={last}").json()["events"])
+
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}
+    ids = [i["id"] for i in client.get("/api/items").json()["items"]]
+    assert ids[0] == "itm_0001" and len(ids) == 18
+
+
+def test_reset_with_nothing_listed():
+    assert client.post("/api/admin/reset").json() == {"reset": True, "closed_listings": []}
+
+
+def test_seed_works_again_after_db_is_wiped_elsewhere():
+    """init_db.py --reset empties Tiger without telling the running server;
+    seeding must notice the rows are gone instead of trusting a cache."""
+    from app.core import db
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}
+    db.reset()                                  # wiped outside the API
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("need a warm blanket for winter", "wool blanket"),
+    ("blanket, moving to Chicago in December", "wool blanket"),
+    ("pots and pans, moving to Chicago in December", "cookware set"),
+    ("space heater, moving to Chicago in December", "space heater"),
+])
+def test_home_goods_ignore_coat_requirements(text, expected):
+    """Cold context must not turn a blanket or heater request into outerwear."""
+    client.post("/api/admin/seed")
+    body = client.post("/api/requests", json={"text": text, "zip": "54301"}).json()
+    assert body["matches"] and body["matches"][0]["item"]["item"] == expected
+
+
+@pytest.mark.parametrize("text,clim", [
+    ("it's freezing and the heat is out", "cold"),
+    ("heat got shut off this winter", "cold"),
+    ("no heat, need a space heater", None),
+    ("coat for Chicago in July", "hot"),
+])
+def test_climate_words(text, clim):
+    assert stub_rules.climate(text, "") == clim
+
+
+@pytest.mark.parametrize("text", ["one size fits all beanie", "comes in all sizes",
+                                  "oversized hoodie", "right-sized desk"])
+def test_size_words_are_not_sizes(text):
+    assert stub_rules.find_size(text) is None

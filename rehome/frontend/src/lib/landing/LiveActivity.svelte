@@ -23,19 +23,23 @@
 
   onMount(() => {
     let last = 0;
+    let lost = false;   // backend was unreachable: its event ids may have restarted
     let delay = 2000;
     let timer;
     let alive = true;
     const tick = async () => {
       try {
-        const { events: fresh } = await getEvents(last);
-        if (fresh.length) {
-          last = fresh.at(-1).id;
-          events = [...events, ...fresh.map((e) => ({ ...e, time: clock(e.created_at) }))].slice(-5);
+        const { events: fresh } = await getEvents(lost ? 0 : last);
+        if (lost) { events = []; last = 0; lost = false; }
+        const added = fresh.filter((e) => e.id > last);
+        if (added.length) {
+          last = added.at(-1).id;
+          events = [...events, ...added.map((e) => ({ ...e, time: clock(e.created_at) }))].slice(-5);
         }
         delay = 2000;
       } catch {
         // Backend not running: keep showing the example rows and check back less often.
+        lost = true;
         delay = Math.min(delay * 2, 30000);
       }
       if (alive) timer = setTimeout(tick, delay);

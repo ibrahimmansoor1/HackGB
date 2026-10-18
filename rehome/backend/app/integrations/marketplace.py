@@ -23,6 +23,7 @@ from app.core import config
 KIND_LISTING = 30402
 CURRENCY = "USD"
 SHOPSTR_LISTING_URL = "https://shopstr.store/listing/{naddr}"   # seller: /marketplace/<npub>
+NJUMP_URL = "https://njump.me/{naddr}"   # plain Nostr viewer; works when Shopstr is down
 CONNECT_WAIT_S = 4     # wait for relay sockets before sending
 OK_WAIT_S = 4          # wait for each relay's OK after sending
 TIMEOUT_S = 10         # hard backstop on connect + send, so the API never hangs
@@ -59,10 +60,11 @@ def _title(item: dict) -> str:
     return title[:80]
 
 
-def _content(item: dict) -> str:
+def _content(item: dict, description: str | None = None) -> str:
     lines = []
-    if item.get("summary"):
-        lines += [item["summary"], ""]
+    text = (description or "").strip() or item.get("summary")
+    if text:
+        lines += [text, ""]
     details = [("Condition", item.get("condition")), ("Size", item.get("size")),
                ("Color", item.get("color")), ("Season", item.get("season")),
                ("Features", ", ".join(item.get("attributes") or []))]
@@ -89,22 +91,31 @@ def _is_public_image(url: str | None) -> bool:
     return ip.is_global
 
 
+def has_public_image(item: dict) -> bool:
+    """Shopstr hides listings without a photo it can load."""
+    return _is_public_image(item.get("image_url"))
+
+
 def build_listing_event(item: dict, price: int | float, status: str = "active",
                         published_at: int | None = None, keys: Keys | None = None,
-                        created_at: int | None = None):
+                        created_at: int | None = None, title: str | None = None,
+                        description: str | None = None):
     """Signed NIP-99 event for one item. Pure: no network, no DB.
 
-    Reads only catalog fields; donor_id, note, and other personal data never
-    leave the server. `d` = item id, so republishing replaces the listing."""
+    `title`/`description` are the pricing agent's listing_draft; without them
+    the title and content are built from the item's catalog fields. Reads only
+    catalog fields; donor_id, note, and other personal data never leave the
+    server. `d` = item id, so republishing replaces the listing."""
     if status not in ("active", "sold"):
         raise ValueError(f"status must be active or sold, not {status!r}")
     keys = keys or _signing_keys()
     published = published_at or Timestamp.now().as_secs()
     amount = f"{price:g}" if isinstance(price, float) else str(price)
 
+    title = (title or "").strip()[:80] or _title(item)
     tags = [["d", item["id"]],
-            ["title", _title(item)],
-            ["summary", item.get("summary") or _title(item)],
+            ["title", title],
+            ["summary", item.get("summary") or title],
             ["price", amount, CURRENCY],
             ["published_at", str(published)],
             ["status", status]]
@@ -120,7 +131,7 @@ def build_listing_event(item: dict, price: int | float, status: str = "active",
     if _is_public_image(item.get("image_url")):
         tags.append(["image", item["image_url"]])
 
-    builder = EventBuilder(Kind(KIND_LISTING), _content(item)).tags(
+    builder = EventBuilder(Kind(KIND_LISTING), _content(item, description)).tags(
         [Tag.parse(t) for t in tags])
     if created_at:
         builder = builder.custom_created_at(Timestamp.from_secs(created_at))
@@ -148,9 +159,9 @@ def _signing_keys() -> Keys:
     return _throwaway
 
 
-def _view_url(ev, relays: list[str]) -> str:
-    """Shopstr listing page; Shopstr resolves `naddr` (kind + author + d tag),
-    so the link keeps working after the listing is republished."""
+def _naddr(ev, relays: list[str]) -> str:
+    """`naddr` = kind + author + d tag (+ relay hints). Viewers resolve it to the
+    newest version, so links keep working after the listing is republished."""
     hints = []
     for url in relays[:NADDR_RELAY_HINTS]:
         try:
@@ -159,7 +170,7 @@ def _view_url(ev, relays: list[str]) -> str:
             continue
     d_tag = next(t[1] for t in _tags(ev) if t[0] == "d")
     coord = Coordinate(ev.kind(), ev.author(), d_tag)
-    return SHOPSTR_LISTING_URL.format(naddr=Nip19Coordinate(coord, hints).to_bech32())
+    return Nip19Coordinate(coord, hints).to_bech32()
 
 
 def _tags(ev) -> list[list[str]]:
@@ -176,12 +187,14 @@ def _new_client() -> Client:
     return Client()
 
 
-async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
-    """Send a signed event. Returns (accepted, failed) relay URLs; never raises,
+async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str], dict[str, str]]:
+    """Send a signed event. Returns (accepted, failed, errors): relay URLs, plus
+    why each failed relay refused (its OK message, or a timeout). Never raises,
     never takes longer than ~TIMEOUT_S."""
     client = _new_client()
     accepted: list[str] = []
     failed: list[str] = []
+    errors: dict[str, str] = {}
     added: dict[str, str] = {}   # normalized relay URL -> URL as configured
     for url in relays:
         try:
@@ -190,6 +203,7 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
             added[_norm(parsed)] = url
         except Exception:
             failed.append(url)
+            errors[url] = "invalid relay URL"
 
     async def _send():
         await client.connect(timedelta(seconds=CONNECT_WAIT_S))
@@ -197,51 +211,79 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
         return await client.send_event(ev, ok_timeout=timedelta(seconds=OK_WAIT_S))
 
     if added:
+        reasons: dict[str, str] = {}
         try:
             out = await asyncio.wait_for(_send(), timeout=TIMEOUT_S)
             ok = {_norm(u) for u in out.success}
             accepted = [url for key, url in added.items() if key in ok]
-        except Exception:   # timeout or SDK error: nothing confirmed
+            reasons = {_norm(u): str(msg) for u, msg in (out.failed or {}).items()}
+            default = f"no reply within {OK_WAIT_S}s (couldn't connect?)"
+        except asyncio.TimeoutError:
             accepted = []
-        failed += [url for url in added.values() if url not in accepted]
+            default = f"timed out after {TIMEOUT_S}s (couldn't connect?)"
+        except Exception as e:   # SDK error: nothing confirmed
+            accepted = []
+            default = f"error: {e}"[:160]
+        for key, url in added.items():
+            if url not in accepted:
+                failed.append(url)
+                errors[url] = (reasons.get(key) or default)[:160]
     try:
         await asyncio.wait_for(client.disconnect(), timeout=2)
     except Exception:
         pass
-    return accepted, failed
+    return accepted, failed, errors
+
+
+# Last created_at signed per listing (`d` tag). Relays keep only the newest
+# version of a replaceable event (whole seconds), so list -> expire -> relist
+# within a second or two must still move forward or the "sold" copy wins.
+_last_created: dict[str, int] = {}
 
 
 async def _publish(item: dict, price: int | float, status: str,
-                   published_at: int | None = None, created_at: int | None = None) -> dict:
+                   published_at: int | None = None, created_at: int | None = None,
+                   title: str | None = None, description: str | None = None) -> dict:
+    created = max(created_at or Timestamp.now().as_secs(), _last_created.get(item["id"], 0) + 1)
+    _last_created[item["id"]] = created
     ev = build_listing_event(item, price, status, published_at=published_at,
-                             created_at=created_at)
+                             created_at=created, title=title, description=description)
     relays = list(config.NOSTR_RELAYS)
     live = is_live()
     if live:
-        accepted, failed = await _broadcast(ev, relays)
+        accepted, failed, errors = await _broadcast(ev, relays)
     else:
-        accepted, failed = [], []
+        accepted, failed, errors = [], [], {}
+    naddr = _naddr(ev, relays)
     return {"event_id": ev.id().to_hex(),
             "npub": ev.author().to_bech32(),
             "relays_accepted": accepted,
             "relays_failed": failed,
-            "url": _view_url(ev, relays),
+            "relay_errors": errors,
+            "url": SHOPSTR_LISTING_URL.format(naddr=naddr),
+            "nostr_url": NJUMP_URL.format(naddr=naddr),
             "published_at": int(next(t[1] for t in _tags(ev) if t[0] == "published_at")),
+            "title": next(t[1] for t in _tags(ev) if t[0] == "title"),
+            "description": (description or "").strip() or item.get("summary") or "",
             "dry_run": not live}
 
 
-async def publish_listing(item: dict, price: int | float) -> dict:
+async def publish_listing(item: dict, price: int | float, title: str | None = None,
+                          description: str | None = None) -> dict:
     """Post a new active listing. Returns {event_id, npub, relays_accepted,
-    relays_failed, url, published_at, dry_run}."""
-    return await _publish(item, price, "active")
+    relays_failed, relay_errors, url, nostr_url, published_at, title,
+    description, dry_run}; title/description are what was posted."""
+    return await _publish(item, price, "active", title=title, description=description)
 
 
-async def mark_sold(item: dict, price: int | float, published_at: int | None = None) -> dict:
+async def mark_sold(item: dict, price: int | float, published_at: int | None = None,
+                    title: str | None = None, description: str | None = None) -> dict:
     """Republish the same `d` tag with status=sold so clients drop it from
     active listings. Pass the original published_at to keep NIP-99 semantics."""
     # Replaceable events: the newer created_at wins, so never tie the original.
     created = max(Timestamp.now().as_secs(), (published_at or 0) + 1)
-    return await _publish(item, price, "sold", published_at=published_at, created_at=created)
+    return await _publish(item, price, "sold", published_at=published_at, created_at=created,
+                          title=title, description=description)
 
 
 # ---- channel interface -----------------------------------------------------
@@ -249,21 +291,22 @@ class Channel(Protocol):
     platform: str   # stored in listings.platform
     label: str      # shown in the activity feed
 
-    async def publish(self, item: dict, price: int | float) -> dict: ...
+    async def publish(self, item: dict, price: int | float, title: str | None = None,
+                      description: str | None = None) -> dict: ...
 
-    async def mark_sold(self, item: dict, price: int | float,
-                        published_at: int | None = None) -> dict: ...
+    async def mark_sold(self, item: dict, price: int | float, published_at: int | None = None,
+                        title: str | None = None, description: str | None = None) -> dict: ...
 
 
 class NostrChannel:
     platform = "nostr"
     label = "Shopstr"
 
-    async def publish(self, item, price):
-        return await publish_listing(item, price)
+    async def publish(self, item, price, title=None, description=None):
+        return await publish_listing(item, price, title, description)
 
-    async def mark_sold(self, item, price, published_at=None):
-        return await mark_sold(item, price, published_at)
+    async def mark_sold(self, item, price, published_at=None, title=None, description=None):
+        return await mark_sold(item, price, published_at, title, description)
 
 
 # Roadmap: "ebay": EbayChannel(), "etsy": ..., "shopify": ...
