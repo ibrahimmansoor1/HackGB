@@ -2,6 +2,7 @@
   // Polls /api/impact (Tiger continuous aggregate). Used on /feed.
   import { onMount } from 'svelte';
   import { getImpact } from '$lib/api.js';
+  import Count from '$lib/Count.svelte';
 
   const TILES = [
     ['items_donated', 'Items donated'],
@@ -11,6 +12,10 @@
   ];
 
   let stats = $state(null);
+
+  const top = $derived(
+    Math.max(1, ...(stats?.by_category ?? []).map((c) => c.items_donated + c.matches_accepted))
+  );
 
   onMount(() => {
     const tick = async () => {
@@ -24,28 +29,35 @@
 
 {#if stats}
   <section aria-label="Impact">
-    <div class="tiles">
-      {#each TILES as [key, label] (key)}
-        <div class="tile"><strong>{stats.totals[key]}</strong><span>{label}</span></div>
+    <div class="grid grid-cols-2 gap-3">
+      {#each TILES as [key, label], i (key)}
+        <div class="rounded-2xl border border-line bg-surface p-4">
+          <strong class="block font-display text-4xl font-bold tabular-nums {i === 1 ? 'text-sage' : ''}">
+            <Count value={stats.totals[key]} />
+          </strong>
+          <span class="text-sm text-ink-soft">{label}</span>
+        </div>
       {/each}
     </div>
+
     {#if stats.by_category.length}
-      <table>
-        <thead><tr><th>Category</th><th>Donated</th><th>Claimed</th></tr></thead>
-        <tbody>
-          {#each stats.by_category as c (c.category)}
-            <tr><td>{c.category}</td><td>{c.items_donated}</td><td>{c.matches_accepted}</td></tr>
-          {/each}
-        </tbody>
-      </table>
+      <h3 class="mt-8 font-display text-lg font-bold">By category</h3>
+      <ul class="mt-3 space-y-3">
+        {#each stats.by_category as c (c.category)}
+          <li>
+            <div class="flex justify-between text-sm">
+              <span class="capitalize">{c.category}</span>
+              <span class="font-mono text-ink-soft">{c.items_donated} given · {c.matches_accepted} claimed</span>
+            </div>
+            <div class="mt-1.5 flex h-2 overflow-hidden rounded-full bg-ink/5">
+              <div class="bg-lamp transition-[width] duration-700 ease-out"
+                style="width: {(c.items_donated / top) * 100}%"></div>
+              <div class="bg-sage transition-[width] duration-700 ease-out"
+                style="width: {(c.matches_accepted / top) * 100}%"></div>
+            </div>
+          </li>
+        {/each}
+      </ul>
     {/if}
   </section>
 {/if}
-
-<style>
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
-  .tile { border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.75rem; display: grid; }
-  .tile strong { font-size: 2rem; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
-  th, td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid #eee; }
-</style>

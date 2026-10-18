@@ -35,6 +35,8 @@
   onMount(load);
 </script>
 
+<div class="legacy">
+
 <h1>Marketplace</h1>
 <p class="text-ink-soft">Things people chose to sell, listed on Nostr so they show up on Shopstr.
   Whatever doesn't sell in 30 days is given away for free.</p>
@@ -65,3 +67,5 @@
   </button>
 {/if}
 {#if notice}<p>{notice}</p>{/if}
+</div>
+

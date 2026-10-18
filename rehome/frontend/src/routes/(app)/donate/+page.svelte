@@ -3,6 +3,8 @@
   import { takePendingPhoto } from '$lib/pending.js';
   import ListingInfo from '$lib/ListingInfo.svelte';
   import DropOff from '$lib/DropOff.svelte';
+  import { onMount } from 'svelte';
+  import { loadZip, saveZip } from '$lib/zip.js';
 
   // Under this (top of the quoted range), suggest a drop-off instead of selling.
   const CHEAP_UNDER = 10;
@@ -14,6 +16,7 @@
   let preview = $state(null);
   let text = $state('');
   let zip = $state('');
+  onMount(() => { zip ||= loadZip(); });
   let loading = $state('');
   let error = $state('');
   let draft = $state(null);
@@ -43,6 +46,7 @@
   function describe() {
     if (!images.length && !text) { error = 'Add a photo or a short description.'; return; }
     if (!zip) { error = 'Add your zip code.'; return; }
+    saveZip(zip);
     draft = null; donated = null; quote = null; sold = null; handled = null; value = null;
     run('Describing your item…', async () => {
       draft = await parseItem({ images, text, zip });
@@ -89,6 +93,8 @@
   }
 </script>
 
+<div class="legacy">
+
 <h1>Give something</h1>
 
 {#if !draft}
@@ -103,7 +109,7 @@
   <label for="zip">Zip code</label>
   <input id="zip" bind:value={zip} inputmode="numeric" maxlength="5" />
 
-  <button onclick={describe} disabled={!!loading}>{loading || 'Describe my item'}</button>
+  <button class="primary" onclick={describe} disabled={!!loading}>{loading || 'Describe my item'}</button>
 {:else}
   {@const it = draft.item}
   <h2>{it.color} {it.brand ? `${it.brand} ` : ''}{it.item}</h2>
@@ -115,11 +121,11 @@
     <p role="status">{handled.summary}</p>
     {#if handled.listing}<ListingInfo listing={handled.listing} />{/if}
     {#if isCheap(handled.price_quote)}<DropOff item={it} {zip} price={handled.price_quote} after />{/if}
-    <button onclick={startOver}>Give something else</button>
+    <button class="secondary" onclick={startOver}>Give something else</button>
   {:else if donated}
     <p role="status">{donated.message}</p>
     {#if isCheap(value?.suggested_price)}<DropOff item={it} {zip} price={value.suggested_price} after />{/if}
-    <button onclick={startOver}>Give something else</button>
+    <button class="secondary" onclick={startOver}>Give something else</button>
   {:else if sold}
     <h2>For sale</h2>
     {#if sold.listing.title}
@@ -128,7 +134,7 @@
     <ListingInfo listing={sold.listing} />
     <p class="text-sm text-ink-soft">If it doesn't sell in 30 days, it goes back to the donation pool.
       See all listings on the <a class="underline" href="/marketplace">marketplace</a>.</p>
-    <button onclick={startOver}>Give something else</button>
+    <button class="secondary" onclick={startOver}>Give something else</button>
   {:else}
     {#if !quote}
       {#if isCheap(value?.suggested_price)}
@@ -136,7 +142,7 @@
       {:else if value}
         <p>Worth about ${value.suggested_price.low}–${value.suggested_price.high}</p>
       {/if}
-      <button onclick={letAgentsHandle} disabled={!!loading}>Let Rehome handle it</button>
+      <button class="primary" onclick={letAgentsHandle} disabled={!!loading}>Let ReHome handle it</button>
       <p class="hint">Our agents price it, check who nearby needs it, then sell or donate it for you.</p>
     {/if}
     {#if quote}
@@ -159,18 +165,19 @@
 
       <label for="price">Your price (USD)</label>
       <input id="price" type="number" min="1" step="1" bind:value={price} class="!w-32" />
-      <button onclick={list} disabled={!!loading}>List on Shopstr</button>
+      <button class="primary" onclick={list} disabled={!!loading}>List on Shopstr</button>
       <p class="text-sm text-ink-soft">Not worth the hassle? You can still donate it.</p>
     {:else}
-      <button onclick={sell} disabled={!!loading}>Sell it</button>
+      <button class="secondary" onclick={sell} disabled={!!loading}>Sell it</button>
     {/if}
-    <button onclick={donate} disabled={!!loading}>Donate it</button>
-    <button onclick={startOver} disabled={!!loading}>Start over</button>
+    <button class="secondary" onclick={donate} disabled={!!loading}>Donate it</button>
+    <button class="ghost" onclick={startOver} disabled={!!loading}>Start over</button>
     {#if loading}<p role="status">{loading}</p>{/if}
   {/if}
 {/if}
 
 {#if error}<p role="alert">{error}</p>{/if}
+</div>
 
 <style>
   .hint { color: #666; margin-top: 0.25rem; }

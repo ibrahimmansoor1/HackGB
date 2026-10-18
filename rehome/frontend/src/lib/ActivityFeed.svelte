@@ -1,7 +1,14 @@
 <script>
-  // Polls /api/events and shows each agent step. Used on /feed (demo screen).
+  // Polls /api/events and shows each agent step, newest first. Used on /feed (demo screen).
   import { onMount } from 'svelte';
-  import { getEvents } from '$lib/api.js';
+  import { flip } from 'svelte/animate';
+  import { BASE, getEvents } from '$lib/api.js';
+  import { rise, glide } from '$lib/motion.js';
+
+  const DOT = {
+    parser: 'bg-[#8b74d4]', requester: 'bg-sage', pricing: 'bg-lamp', concierge: 'bg-[#4f86c6]',
+    matchmaker: 'bg-[#d0648f]', orchestrator: 'bg-ink-soft/40'
+  };
 
   let events = $state([]);
   let error = $state('');
@@ -19,43 +26,37 @@
         if (lost) { events = []; last = 0; lost = false; }
         const added = fresh.filter((e) => e.id > last);
         if (added.length) {
-          events = [...events, ...added].slice(-100);
-          last = added.at(-1).id;
+          events = [...added.reverse(), ...events].slice(0, 60);
+          last = events[0].id;
         }
         error = '';
       } catch {
         lost = true;
-        error = 'Can’t reach the backend. Is it running on port 8000?';
+        error = `Can’t reach the backend at ${BASE}. Is it running?`;
       }
       if (alive) timer = setTimeout(tick, 1000);
     };
     tick();
     return () => { alive = false; clearTimeout(timer); };
   });
+
+  const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 </script>
 
 <section aria-live="polite">
-  {#if error}<p class="error">{error}</p>{/if}
-  {#if !events.length && !error}<p class="muted">Waiting for the first donation or request…</p>{/if}
-  <ol>
+  {#if error}<p class="text-brick">{error}</p>{/if}
+  {#if !events.length && !error}<p class="text-ink-soft">Waiting for the first donation or request…</p>{/if}
+  <ol class="divide-y divide-line">
     {#each events as e (e.id)}
-      <li class={e.agent}>
-        <span class="agent">{e.agent}</span>
-        <span>{e.message}</span>
+      <li animate:flip={glide()} in:rise={{ y: -10 }} class="grid grid-cols-[7.5rem_1fr] gap-4 py-3">
+        <span class="flex items-center gap-2 text-sm font-semibold">
+          <span class="size-2 shrink-0 rounded-full {DOT[e.agent] ?? 'bg-ink-soft/40'}"></span>{e.agent}
+        </span>
+        <span class="text-sm">
+          {e.message}
+          <span class="ml-1 font-mono text-xs text-ink-soft">{time(e.created_at)}</span>
+        </span>
       </li>
     {/each}
   </ol>
 </section>
-
-<style>
-  ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
-  li { display: grid; grid-template-columns: 8rem 1fr; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid #ddd; }
-  .agent { font-weight: 600; }
-  .parser .agent { color: #6b4fbb; }
-  .requester .agent { color: #1f7a6d; }
-  .pricing .agent { color: #a15c00; }
-  .concierge .agent { color: #1d5fa8; }
-  .matchmaker .agent { color: #b0306a; }
-  .error { color: #b00020; }
-  .muted { color: #777; }
-</style>
