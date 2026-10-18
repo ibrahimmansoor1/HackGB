@@ -44,8 +44,8 @@ def _tag(ev, name):
 
 
 def _new_item() -> str:
-    r = client.post("/api/items", data={"zip": "02115", "note": "barely worn",
-                                        "donor_id": "donor_secret_42"})
+    r = client.post("/api/items", data={"zip": "02115", "donor_id": "donor_secret_42",
+                                        "note": "Black puffer jacket, size M, barely worn"})
     assert r.status_code == 201
     return r.json()["id"]
 

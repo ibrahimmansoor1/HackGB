@@ -2,19 +2,20 @@
 Flows and ranking rules are specified in docs/02 and docs/05."""
 import asyncio
 from datetime import datetime, timedelta, timezone
-from app.agents import parser, requester
+from app.agents import parser, requester, stub_rules
 from app.agents.events import emit
 from app.core import config, db, llm
 from app.integrations import marketplace
-from app.schemas import (ExpiryOut, Item, Listing, ListItemOut, Match, ParsedItem,
-                         RequestOut)
+from app.seed_data import SEED_ITEMS, summary as seed_summary
+from app.schemas import (AgentEvent, ExpiryOut, Item, Listing, ListItemOut, Match,
+                         ParsedItem, RequestOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
 {"item_id": "...", "reason": "..."}."""
 
 # Stub embeddings score much lower than real ones.
-THRESHOLD = 0.15 if config.USE_STUBS else config.MATCH_THRESHOLD
+THRESHOLD = 0.2 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
 _listing_now: set[str] = set()   # items being published; guards double-clicks and matching
 
@@ -31,6 +32,24 @@ def _public(row: dict) -> Item:
     return Item.model_validate({k: v for k, v in row.items() if k != "embedding"})
 
 
+def _embed_text(p: dict) -> str:
+    return " ".join([p["summary"], *p["attributes"], p["item"], p["category"],
+                     p.get("season") or ""]).strip()
+
+
+# ---- reads for routers (routers never import db) ---------------------------
+def new_item_id() -> str:
+    return db.new_item_id()
+
+
+def items(status: str | None = None) -> list[Item]:
+    return [_public(r) for r in db.list_items(status)]
+
+
+def events(after: int = 0) -> list[AgentEvent]:
+    return [AgentEvent.model_validate(e) for e in db.list_events(after)]
+
+
 # ---- donor path: D1 -> D4 --------------------------------------------------
 async def donate(note: str | None, zip_code: str, donor_id: str,
                  image_bytes: bytes | None, image_mime: str,
@@ -44,7 +63,7 @@ async def donate(note: str | None, zip_code: str, donor_id: str,
 
 async def store(parsed: ParsedItem, note: str | None, zip_code: str,
                 donor_id: str, image_url: str | None, item_id: str) -> Item:
-    vec = await llm.embed(f"{parsed.summary} {' '.join(parsed.attributes)} {parsed.item}")
+    vec = await llm.embed(_embed_text(parsed.model_dump()))
     row = {**parsed.model_dump(), "id": item_id, "donor_id": donor_id, "note": note,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}
@@ -65,8 +84,10 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
 
     qvec = await llm.embed(query.search_text)
     # Items mid-listing are still `available` in the DB; never reserve one.
-    candidates = [(r, s) for r, s in db.vector_search(qvec, top_k=config.TOP_K + len(_listing_now))
-                  if r["id"] not in _listing_now][:config.TOP_K]
+    # Stub mode re-ranks harder (stub_fit), so it searches a wider pool first.
+    pool = config.TOP_K * (3 if config.USE_STUBS else 1)
+    candidates = [(r, s) for r, s in db.vector_search(qvec, top_k=pool + len(_listing_now))
+                  if r["id"] not in _listing_now][:pool]
     emit("orchestrator", f"Found {len(candidates)} candidates", request_id=req_id)
 
     # threshold + must_have boost
@@ -74,9 +95,15 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     for row, score in candidates:
         if score < THRESHOLD:
             continue
-        hits = sum(a in row["attributes"] for a in query.must_have)
-        ranked.append((row, score, score + 0.05 * hits))
+        hits = sum(stub_rules.satisfies(row["attributes"], a) for a in query.must_have)
+        final = score + 0.05 * hits
+        if config.USE_STUBS:
+            final += stub_rules.stub_fit(query.model_dump(), row)
+            if final < THRESHOLD:
+                continue
+        ranked.append((row, score, final))
     ranked.sort(key=lambda x: x[2], reverse=True)
+    ranked = ranked[:config.TOP_K]
 
     reasons = await _reasons(query, [r for r, _, _ in ranked])
     matches = [Match(item_id=row["id"], rank=i + 1, score=round(score, 3),
@@ -105,7 +132,8 @@ async def _reasons(query, rows: list[dict]) -> dict[str, str]:
     if not rows:
         return {}
     if config.USE_STUBS:
-        return {r["id"]: f"{r['item'].capitalize()}: {', '.join(r['attributes'][:3])}" for r in rows}
+        q = query.model_dump()
+        return {r["id"]: stub_rules.reason(q, r) for r in rows}
     cands = [{"item_id": r["id"], "summary": r["summary"], "attributes": r["attributes"]}
              for r in rows]
     try:
@@ -113,7 +141,34 @@ async def _reasons(query, rows: list[dict]) -> dict[str, str]:
                                       f"Request: {query.model_dump_json()}\nCandidates: {cands}")
         return {o["item_id"]: o["reason"] for o in out}
     except Exception:
-        return {}
+        q = query.model_dump()
+        return {r["id"]: stub_rules.reason(q, r) for r in rows}
+
+
+# ---- demo seed ---------------------------------------------------------------
+_seeded: list[str] = []
+
+
+async def seed_demo() -> int:
+    """Load SEED_ITEMS once (pre-parsed, no model call). Calling it again is a
+    no-op so a double-click doesn't duplicate the inventory."""
+    if _seeded:
+        emit("orchestrator", f"Demo inventory already loaded ({len(_seeded)} items)")
+        return 0
+    for cat, item, color, size, cond, season, attrs, note, zip_code, photo in SEED_ITEMS:
+        parsed = {"category": cat, "item": item, "color": color, "size": size,
+                  "condition": cond, "season": season, "attributes": attrs,
+                  "summary": seed_summary(color, item, size, cond, attrs)}
+        ParsedItem.model_validate(parsed)
+        item_id = db.new_item_id()
+        db.insert_item({**parsed, "id": item_id, "donor_id": "demo_donor", "note": note,
+                        "zip": zip_code,
+                        "image_url": config.public_url(f"/static/seed/{photo}.png"),
+                        "status": "available", "embedding": await llm.embed(_embed_text(parsed)),
+                        "created_at": db.now()})
+        _seeded.append(item_id)
+    emit("orchestrator", f"Loaded {len(_seeded)} demo items into inventory")
+    return len(_seeded)
 
 
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------

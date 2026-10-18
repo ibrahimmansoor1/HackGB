@@ -1,6 +1,7 @@
 """Requester agent: free text + zip -> StructuredQuery (R2 -> R3).
 Pure function: never touches the DB. Prompt spec in docs/05-agents.md."""
 from pydantic import ValidationError
+from app.agents import stub_rules
 from app.core import config, llm
 from app.schemas import StructuredQuery
 
@@ -18,7 +19,7 @@ No prose, no markdown fences."""
 
 async def parse_request(text: str, zip_code: str) -> StructuredQuery:
     if config.USE_STUBS:
-        return _stub(text)
+        return _stub(text, zip_code)
     user = f"Request: {text}\nZip code: {zip_code}"
     for attempt in range(2):
         try:
@@ -29,12 +30,7 @@ async def parse_request(text: str, zip_code: str) -> StructuredQuery:
                 raise
 
 
-def _stub(text: str) -> StructuredQuery:
-    cold = any(w in text.lower() for w in ("chicago", "winter", "cold", "snow", "december"))
-    must = ["insulated", "water-resistant"] if cold else []
-    return StructuredQuery(
-        need=text,
-        inferred_context=["sub-freezing winters", "snow"] if cold else [],
-        must_have=must, nice_to_have=["hooded"] if cold else [],
-        search_text=" ".join([text, *must, "winter" if cold else ""]).strip(),
-    )
+def _stub(text: str, zip_code: str = "") -> StructuredQuery:
+    """Keyword rules: place/month/zip -> climate -> catalog attributes.
+    See agents/stub_rules.py."""
+    return StructuredQuery.model_validate(stub_rules.parse_need(text, zip_code))

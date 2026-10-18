@@ -1,6 +1,7 @@
 """Parser agent: photo and/or note -> ParsedItem (D2 -> D3).
 Pure function: never touches the DB. Prompt spec in docs/05-agents.md."""
 from pydantic import ValidationError
+from app.agents import stub_rules
 from app.core import config, llm
 from app.schemas import ParsedItem
 
@@ -19,7 +20,7 @@ No prose, no markdown fences."""
 async def parse_item(note: str | None, image_bytes: bytes | None,
                      image_mime: str = "image/jpeg") -> ParsedItem:
     if config.USE_STUBS:
-        return _stub(note)
+        return _stub(note, image_bytes is not None)
     user = f"Donor note: {note or '(none)'}"
     for attempt in range(2):  # one retry on bad JSON
         try:
@@ -30,10 +31,7 @@ async def parse_item(note: str | None, image_bytes: bytes | None,
                 raise
 
 
-def _stub(note: str | None) -> ParsedItem:
-    return ParsedItem(
-        category="outerwear", item="puffer jacket", color="black", size="M",
-        condition="like new", season="winter",
-        attributes=["insulated", "hooded", "water-resistant"],
-        summary=f"Black hooded puffer jacket, size M. {note or ''}".strip(),
-    )
+def _stub(note: str | None, has_image: bool = False) -> ParsedItem:
+    """Deterministic keyword parse of the note; a photo with no note reads as
+    the demo jacket. See agents/stub_rules.py."""
+    return ParsedItem.model_validate(stub_rules.parse_note(note, has_image))

@@ -10,8 +10,10 @@ Safety: nothing is sent to relays unless NOSTR_NSEC is set AND
 MARKETPLACE_DRY_RUN=false. Dry runs sign with a throwaway key and stay local.
 """
 import asyncio
+import ipaddress
 from datetime import timedelta
 from typing import Protocol
+from urllib.parse import urlparse
 
 from nostr_sdk import (Client, Coordinate, EventBuilder, Keys, Kind, Nip19Coordinate,
                        RelayUrl, Tag, Timestamp)
@@ -70,7 +72,21 @@ def _content(item: dict) -> str:
 
 
 def _is_public_image(url: str | None) -> bool:
-    return bool(url) and url.lower().startswith(("http://", "https://"))
+    """Only URLs other people can open: http(s) and not localhost / a private LAN
+    address (those would be broken images on Shopstr)."""
+    if not url:
+        return False
+    parts = urlparse(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme not in ("http", "https") or not host:
+        return False
+    if host == "localhost" or host.endswith((".local", ".localhost", ".internal")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True   # a real hostname
+    return ip.is_global
 
 
 def build_listing_event(item: dict, price: int | float, status: str = "active",

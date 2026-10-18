@@ -58,10 +58,25 @@ async def embed(text: str) -> list[float]:
     return r.json()["data"][0]["embedding"]
 
 
+# Stub only: fold common synonyms together so "pots and pans" finds cookware
+# and "coat" finds a parka. Real embeddings don't need this.
+_SYNONYMS = {"pot": "cookware", "pan": "cookware", "skillet": "cookware",
+             "jacket": "coat", "parka": "coat", "peacoat": "coat", "puffer": "coat",
+             "sneaker": "shoe", "trainer": "shoe", "hat": "beanie", "toque": "beanie",
+             "trouser": "pant", "jean": "pant", "comforter": "blanket", "throw": "blanket"}
+
+
+def _stub_token(word: str) -> str:
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        word = word[:-1]
+    return _SYNONYMS.get(word, word)
+
+
 def _stub_embed(text: str) -> list[float]:
     """Bag-of-words hashing so stub matching is roughly sensible offline."""
     v = np.zeros(EMBED_DIM)
     for word in re.findall(r"[a-z]+", text.lower()):
+        word = _stub_token(word)
         v[int(hashlib.md5(word.encode()).hexdigest(), 16) % EMBED_DIM] += 1
     n = np.linalg.norm(v)
     return (v / n if n else v).tolist()

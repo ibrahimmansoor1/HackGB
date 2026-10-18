@@ -18,8 +18,25 @@ TOP_K = int(os.getenv("TOP_K", "3"))
 # frontend can be built before the model is wired up.
 USE_STUBS = not MODAL_ENDPOINT_URL or "your-workspace" in MODAL_ENDPOINT_URL
 
-UPLOAD_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads"
+STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
+UPLOAD_DIR = STATIC_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Where this backend is reachable from outside, so photo URLs are absolute
+# (frontend on another laptop, Nostr image tags). For a public tunnel, set it
+# to the tunnel URL, e.g. https://rehome-demo.ngrok.app
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").strip().rstrip("/")
+
+
+def public_url(path: str) -> str:
+    """'/static/uploads/x.jpg' -> 'http://localhost:8000/static/uploads/x.jpg'."""
+    return f"{PUBLIC_BASE_URL}/{path.lstrip('/')}"
+
+
+# Browser origins allowed to call the API (SvelteKit dev + preview by default).
+CORS_ORIGINS = [o.strip().rstrip("/") for o in os.getenv(
+    "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
+).split(",") if o.strip()]
 
 # Marketplace: Nostr classified listings (NIP-99), shown on Shopstr.
 # Posts go live only when NOSTR_NSEC is set AND MARKETPLACE_DRY_RUN=false.
