@@ -155,6 +155,17 @@ With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and t
 
 The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
 
+## Models on Modal
+
+`infra/modal_llm.py` serves the text model as an OpenAI-compatible vLLM server with tool calling turned on, adapted from [Modal's vLLM example](https://modal.com/docs/examples/vllm_inference) (Gemma 4 26B-A4B on one H200, scales to zero after 15 minutes idle).
+
+```bash
+pip install modal && modal setup     # once
+modal deploy infra/modal_llm.py      # prints the server URL
+modal run infra/modal_llm.py         # optional: waits for it, checks a tool call works
+```
+In `.env`: `MODAL_ENDPOINT_URL=<URL>/v1`, `MODAL_VISION_MODEL=llm`, `MODAL_AGENT_MODEL=llm`. The first request after idle waits for a cold start (a few minutes); send one before the demo.
+
 ## Database (Tiger Data)
 
 With `DATABASE_URL` blank the backend uses the in-memory DB. To use Tiger:

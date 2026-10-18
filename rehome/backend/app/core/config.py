@@ -10,6 +10,8 @@ MODAL_ENDPOINT_URL = os.getenv("MODAL_ENDPOINT_URL", "")
 MODAL_API_KEY = os.getenv("MODAL_API_KEY", "")
 MODAL_VISION_MODEL = os.getenv("MODAL_VISION_MODEL", "")
 MODAL_EMBED_MODEL = os.getenv("MODAL_EMBED_MODEL", "")
+# Tool-calling model for the concierge agent (infra/modal_llm.py serves it as "llm").
+MODAL_AGENT_MODEL = os.getenv("MODAL_AGENT_MODEL", "").strip() or MODAL_VISION_MODEL
 # Input parser (vision). Blank key = stub parser, independent of Modal.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()

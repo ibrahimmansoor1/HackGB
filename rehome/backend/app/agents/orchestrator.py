@@ -15,8 +15,6 @@ REASON_PROMPT = """For each candidate item, write one reason (max 12 words) expl
 fits this request, or what it lacks. Return ONLY a JSON array of
 {"item_id": "...", "reason": "..."}."""
 
-# Stub embeddings score much lower than real ones.
-THRESHOLD = 0.2 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
 DRAFT_TTL = timedelta(hours=24)   # an unsold, undonated draft expires after this
 _listing_now: set[str] = set()   # items being published; guards double-clicks and matching
@@ -228,14 +226,15 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
 
     # threshold + must_have boost
     ranked = []
+    threshold = _threshold()
     for row, score in candidates:
-        if score < THRESHOLD:
+        if score < threshold:
             continue
         hits = sum(stub_rules.satisfies(row["attributes"], a) for a in query.must_have)
         final = score + 0.05 * hits
         if config.USE_STUBS:
             final += stub_rules.stub_fit(query.model_dump(), row)
-            if final < THRESHOLD:
+            if final < threshold:
                 continue
         ranked.append((row, score, final))
     ranked.sort(key=lambda x: x[2], reverse=True)
@@ -293,6 +292,12 @@ async def accept_match(request_id: str, item_id: str) -> AcceptOut:
 
 def _title(row: dict) -> str:
     return f"{row['brand']} {row['item']}" if row.get("brand") else row["item"]
+
+
+def _threshold() -> float:
+    """Hashed stub embeddings score much lower than real ones, so they get their
+    own cutoff; that holds even when the Modal text model is configured."""
+    return 0.2 if llm.stub_embeddings() else config.MATCH_THRESHOLD
 
 
 def _still_available(item_id: str) -> bool:
