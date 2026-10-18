@@ -4,9 +4,9 @@
 
 | Component | Where | Implementation | Sponsor |
 |---|---|---|---|
-| Donor app | `frontend/src/routes/donate` | Upload photo/text → see parsed item → choose **Sell** or **Donate** | – |
-| Requester app | `frontend/src/routes/request` | Submit need + zip, show matches, claim one | – |
-| Impact dashboard | `frontend/src/routes/feed` (+ `ActivityFeed.svelte`) | Live stats from `/api/impact` + agent activity feed | – |
+| Donor app | `frontend/src/routes/(app)/donate` | Upload photo/text → see parsed item → choose **Sell** or **Donate** | – |
+| Requester app | `frontend/src/routes/(app)/request` | Submit need + zip, show matches, claim one | – |
+| Impact dashboard | `frontend/src/routes/(app)/feed` (+ `lib/ActivityFeed.svelte`, `lib/ImpactStats.svelte`) | Live stats from `/api/impact` + agent activity feed | – |
 | Orchestrator | `backend/app/agents/orchestrator.py` | **Deterministic Python**, not an LLM loop. Routes work, embeds, reads/writes DB, ranks, emits every step as an event. The donor's UI choice decides sell vs donate, so no LLM routing. | – |
 | Input parser agent | `backend/app/agents/parser.py` | Photo/text → `ParsedItem` via **Gemini API** (vision) | Gemini (MLH) |
 | Pricing agent | `backend/app/agents/pricing.py` *(create)* | `ParsedItem` + eBay comps → price range + listing draft. LLM on **Modal**; comps from **eBay Browse API** | Modal |
@@ -108,6 +108,6 @@ flowchart LR
 - Dry run by default: without `NOSTR_NSEC`, or with `MARKETPLACE_DRY_RUN=true`, events are signed with a throwaway key and not sent.
 - Live mode with zero relays accepting → item stays `available`, error event, `502`.
 - Channels share one small interface (`Channel`: `publish`, `mark_sold`). Roadmap: Etsy, Shopify, eBay selling (needs developer approval), each as another `Channel`.
-- **Open (owner: ibrahim):** connecting the new Sell path to this channel. Today `POST /api/items/{id}/list` takes an existing `items` id and prices with the heuristic; a sell draft isn't in `items`. Proposed: posting a sell draft inserts it as an item with `status = listed` and the pricing agent's price, so the 30-day rule can release it to the donation pool.
+- **Sell path → this channel (built, ibrahim):** after `/{draft_id}/sell`, the donor picks a price from the quote and calls `POST /api/items/{draft_id}/list` with `{"price": ...}`. The draft becomes an `items` row (not counted as a donation in impact) and is listed right away, so the 30-day rule can release it to the donation pool. `POST /api/items/{item_id}/list` still lists an existing available item; both accept an optional price (default: category × condition).
 
 For the demo, `POST /api/admin/simulate-expiry` fast-forwards the 30 days.

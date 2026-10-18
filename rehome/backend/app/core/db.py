@@ -14,7 +14,10 @@ _requests: dict[str, dict] = {}
 _matches: list[dict] = []
 _events: list[dict] = []
 _listings: dict[str, dict] = {}
+_drafts: dict[str, dict] = {}
 _item_ids = itertools.count(1)
+_draft_ids = itertools.count(1)
+_match_ids = itertools.count(1)
 _req_ids = itertools.count(1)
 _event_ids = itertools.count(1)
 _listing_ids = itertools.count(1)
@@ -42,6 +45,25 @@ def new_item_id() -> str:
 
 def new_request_id() -> str:
     return f"req_{next(_req_ids):04d}"
+
+
+def new_draft_id() -> str:
+    return f"drf_{next(_draft_ids):04d}"
+
+
+# ---- drafts (parsed, not yet sold or donated) ------------------------------
+def insert_draft(row: dict) -> dict:
+    _drafts[row["id"]] = row
+    return row
+
+
+def get_draft(draft_id: str) -> dict | None:
+    return _drafts.get(draft_id)
+
+
+def pop_draft(draft_id: str) -> dict | None:
+    """Remove and return the draft; None if it was already taken."""
+    return _drafts.pop(draft_id, None)
 
 
 # ---- items -----------------------------------------------------------------
@@ -82,8 +104,37 @@ def insert_request(row: dict) -> dict:
     return row
 
 
+def get_request(request_id: str) -> dict | None:
+    return _requests.get(request_id)
+
+
+def update_request_status(request_id: str, status: str) -> None:
+    _requests[request_id]["status"] = status
+
+
 def insert_matches(rows: list[dict]) -> None:
-    _matches.extend(rows)
+    for r in rows:
+        _matches.append({**r, "id": r.get("id") or f"mat_{next(_match_ids):04d}"})
+
+
+def get_match(request_id: str, item_id: str) -> dict | None:
+    return next((m for m in _matches
+                 if m["request_id"] == request_id and m["item_id"] == item_id), None)
+
+
+def update_match_status(match_id: str, status: str) -> None:
+    for m in _matches:
+        if m["id"] == match_id:
+            m["status"] = status
+
+
+def reserve_item(item_id: str) -> bool:
+    """available -> reserved in one step; False if it wasn't available."""
+    row = _items.get(item_id)
+    if row is None or row["status"] != "available":
+        return False
+    row["status"] = "reserved"
+    return True
 
 
 # ---- listings (marketplace) ------------------------------------------------
@@ -113,6 +164,18 @@ def insert_event(row: dict) -> dict:
 
 def list_events(after: int = 0, limit: int = 50) -> list[dict]:
     return [e for e in _events if e["id"] > after][:limit]
+
+
+def impact_rows() -> list[dict]:
+    """Same rows as Tiger's impact_hourly: hourly counts per event_type + category."""
+    counts: dict[tuple, int] = {}
+    for e in _events:
+        if e.get("event_type"):
+            bucket = e["created_at"].replace(minute=0, second=0, microsecond=0)
+            key = (bucket, e["event_type"], e.get("category"))
+            counts[key] = counts.get(key, 0) + 1
+    return [{"bucket": b, "event_type": t, "category": c, "n": n}
+            for (b, t, c), n in counts.items()]
 
 
 BACKEND = "tiger" if config.DATABASE_URL else "memory"

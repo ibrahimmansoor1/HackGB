@@ -56,6 +56,9 @@ ATTRIBUTES = {
     "non-stick": ["non-stick", "nonstick"],
     "machine-washable": ["machine washable", "machine-washable"],
 }
+# Shared attribute vocabulary (docs/05): the parser and requester prompts both
+# list these so item attributes and must_have line up in vector space.
+ATTRIBUTE_VOCAB = list(ATTRIBUTES)
 STOP = {"a", "an", "the", "my", "our", "this", "that", "some", "old", "new", "nice", "great",
         "used", "barely", "worn", "gently", "clean", "cute", "big", "small", "little",
         "pair", "of", "and", "or", "warm", "good", "need", "want", "looking", "for"}
@@ -70,7 +73,7 @@ HOT_PLACES = ["phoenix", "arizona", "miami", "florida", "texas", "houston", "las
 COLD_MONTHS = ["november", "december", "january", "february", "march"]
 HOT_MONTHS = ["june", "july", "august"]
 COLD_WORDS = ["winter", "snow", "cold", "freezing", "blizzard", "ice", "icy"]
-HOT_WORDS = ["summer", "heat", "hot", "humid"]
+HOT_WORDS = ["summer", "hot", "humid"]   # not "heat": here it means home heating
 RAIN_WORDS = ["rain", "rainy", "wet", "storm"]
 # Zip prefixes with real winters: Chicago, Wisconsin, Minnesota, Michigan, Boston.
 COLD_ZIP_PREFIXES = ("600", "601", "602", "603", "604", "605", "606", "607", "608",
@@ -119,11 +122,18 @@ def item_phrase(text: str) -> tuple[str | None, str | None]:
 
 def find_size(text: str) -> str | None:
     """Only sizes the person actually stated. Never guesses."""
-    m = re.search(r"\bsize\s*:?\s*([a-z0-9.]+(?:/[a-z0-9.]+)?)\b", text, re.I)
+    m = re.search(r"\bsize\b\s*:?\s*([a-z0-9.]+(?:/[a-z0-9.]+)?)\b", text, re.I)
     if m:
         size = m.group(1)
         words = {"small": "S", "medium": "M", "large": "L", "xlarge": "XL"}
-        return words.get(size.lower(), size.upper() if size.isalpha() else size)
+        letters = {"xxs", "xs", "s", "m", "l", "xl", "xxl", "xxxl"}
+        if size.lower() in words:
+            return words[size.lower()]
+        if size.lower() in letters:
+            return size.upper()
+        if any(ch.isdigit() for ch in size):
+            return size
+        # "one size fits all", "size and fit": not a stated size; fall through
     m = re.search(r"\b(XXS|XS|XXL|XL|XXXL|\d{1,2}T)\b", text)
     return m.group(1) if m else None
 
@@ -241,10 +251,13 @@ CLIMATE_NEED_PREFIX = {"cold": "winter", "rain": "rain", "hot": "summer"}
 
 def climate(text: str, zip_code: str) -> str | None:
     low = text.lower()
-    if any(_has(low, m) for m in HOT_MONTHS) or any(_has(low, w) for w in HOT_WORDS):
+    # Month first (Chicago in July is summer), then explicit cold, then hot words.
+    if any(_has(low, m) for m in HOT_MONTHS):
         return "hot"
     if any(_has(low, m) for m in COLD_MONTHS) or any(_has(low, w) for w in COLD_WORDS):
         return "cold"
+    if any(_has(low, w) for w in HOT_WORDS):
+        return "hot"
     if any(_has(low, w) for w in RAIN_WORDS) or any(_has(low, p) for p in RAINY_PLACES):
         return "rain"
     if any(_has(low, p) for p in COLD_PLACES):
@@ -271,7 +284,7 @@ def parse_need(text: str, zip_code: str) -> dict:
         context.append("for a child")
     must: list[str] = []
     nice: list[str] = []
-    if clim:
+    if clim and noun_cat not in ("home", "electronics"):   # climate gear is for wearables
         table = NEEDS_BY_CLIMATE[clim]
         must, nice = (list(x) for x in table.get(noun_cat, table.get(cat, table[None])))
     if _has(low, "interview") or _has(low, "job"):
@@ -294,7 +307,7 @@ def parse_need(text: str, zip_code: str) -> dict:
     search = " ".join(dict.fromkeys(w for w in words if w))
     for place in COLD_PLACES + RAINY_PLACES + HOT_PLACES:
         search = re.sub(rf"\b{re.escape(place)}\b", "", search, flags=re.I)
-    return {"need": need, "inferred_context": context, "must_have": must,
+    return {"needs": [need], "inferred_context": context, "must_have": must,
             "nice_to_have": nice, "size": find_size(text),
             "search_text": re.sub(r"\s+", " ", search).strip()}
 
@@ -302,6 +315,10 @@ def parse_need(text: str, zip_code: str) -> dict:
 # ---- match reasons -------------------------------------------------------------
 EQUIVALENT = {"water-resistant": {"water-resistant", "waterproof"},
               "warm": {"warm", "insulated", "wool", "fleece"}}
+
+
+def _first_need(query: dict) -> str:
+    return (query.get("needs") or [""])[0]
 
 
 def satisfies(attributes: list[str], wanted: str) -> bool:
@@ -312,7 +329,7 @@ def stub_fit(query: dict, row: dict) -> float:
     """Stub-mode ranking nudge: hashed bag-of-words can't tell a kids coat from
     an adult one, so reward the asked-for category and keep kids and adult
     items apart."""
-    _, cat = item_phrase(query.get("need") or "")
+    _, cat = item_phrase(_first_need(query))
     wants_kid = "for a child" in (query.get("inferred_context") or [])
     adj = 0.1 if cat and cat == row["category"] else 0.0
     must = query.get("must_have") or []
@@ -329,7 +346,7 @@ def reason(query: dict, row: dict) -> str:
     hits = [a for a in must if satisfies(row["attributes"], a)]
     missing = [a for a in must if a not in hits]
     ctx = (query.get("inferred_context") or [None])[0]
-    noun, cat = find_noun(query.get("need") or "")[:2]
+    noun, cat = find_noun(_first_need(query))[:2]
     if cat and cat != row["category"] and row["category"] != "kids":
         feats = " and ".join(hits[:2] or row["attributes"][:2])
         return " ".join(f"Not {noun}, but {feats}".split()[:12]) if feats else f"Not {noun}"

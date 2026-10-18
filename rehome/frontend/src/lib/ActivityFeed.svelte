@@ -8,21 +8,29 @@
 
   onMount(() => {
     let last = 0;
+    let lost = false;   // backend was unreachable: its event ids may have restarted
+    let timer;
+    let alive = true;
+    // One poll at a time (setTimeout, not setInterval): overlapping polls
+    // appended the same events twice and crashed the keyed list.
     const tick = async () => {
       try {
-        const { events: fresh } = await getEvents(last);
-        if (fresh.length) {
-          events = [...events, ...fresh].slice(-100);
-          last = fresh.at(-1).id;
+        const { events: fresh } = await getEvents(lost ? 0 : last);
+        if (lost) { events = []; last = 0; lost = false; }
+        const added = fresh.filter((e) => e.id > last);
+        if (added.length) {
+          events = [...events, ...added].slice(-100);
+          last = added.at(-1).id;
         }
         error = '';
       } catch {
+        lost = true;
         error = 'Can’t reach the backend. Is it running on port 8000?';
       }
+      if (alive) timer = setTimeout(tick, 1000);
     };
     tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+    return () => { alive = false; clearTimeout(timer); };
   });
 </script>
 
@@ -45,6 +53,7 @@
   .agent { font-weight: 600; }
   .parser .agent { color: #6b4fbb; }
   .requester .agent { color: #1f7a6d; }
+  .pricing .agent { color: #a15c00; }
   .error { color: #b00020; }
   .muted { color: #777; }
 </style>

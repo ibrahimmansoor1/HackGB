@@ -31,19 +31,23 @@ rehome/
 │   │   │   ├── config.py   ← env settings
 │   │   │   ├── db.py       ← database access (in-memory stub; Tiger when DATABASE_URL is set)
 │   │   │   ├── db_pg.py    ← Tiger Data (Postgres + pgvector) version of db.py
-│   │   │   └── llm.py      ← model client (Modal), embeddings
+│   │   │   └── llm.py      ← model clients (Gemini parser, Modal text + embeddings)
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
 │   │   │   ├── orchestrator.py
-│   │   │   ├── parser.py
+│   │   │   ├── parser.py   ← photo/text → ParsedItem (Gemini)
+│   │   │   ├── pricing.py  ← item + eBay comps → price range + listing draft (Modal)
 │   │   │   ├── requester.py
 │   │   │   ├── stub_rules.py ← offline keyword rules used when no model is set
 │   │   │   └── events.py   ← activity feed logger
 │   │   ├── integrations/
-│   │   │   └── marketplace.py ← Nostr NIP-99 listings (Shopstr), pricing
+│   │   │   ├── ebay.py     ← Browse API search (active listings as comps)
+│   │   │   └── marketplace.py ← Nostr NIP-99 listings (Shopstr), heuristic price
 │   │   └── routers/
-│   │       ├── items.py
+│   │       ├── items.py    ← parse, sell, donate (+ legacy one-step donate, list)
 │   │       ├── requests.py
+│   │       ├── matches.py  ← accept a match
+│   │       ├── impact.py   ← dashboard stats
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
 │   │       ├── pages.py    ← HTML listing previews at /listings
@@ -60,6 +64,11 @@ rehome/
 │       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
+│       ├── test_drafts.py  ← parse → donate
+│       ├── test_matches.py ← request → accept
+│       ├── test_impact.py  ← /api/impact
+│       ├── test_parser.py  ← Gemini parser (HTTP faked)
+│       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
 │       ├── test_marketplace.py
 │       └── test_tiger.py   ← Postgres backend; runs only with TEST_DATABASE_URL
 └── frontend/               ← SvelteKit + Tailwind CSS v4 + Lucide icons
@@ -73,6 +82,8 @@ rehome/
         │   ├── api.js      ← the ONLY file that calls the backend
         │   ├── pending.js  ← hands a photo picked on the landing page to /donate
         │   ├── ActivityFeed.svelte
+        │   ├── ImpactStats.svelte ← /api/impact tiles + per-category table
+        │   ├── ListingInfo.svelte ← price, live/practice/expired badge, listing links
         │   ├── components/SiteHeader.svelte
         │   └── landing/
         │       ├── ascii-home.js       ← three.js scene redrawn as ASCII (hero)
@@ -86,9 +97,10 @@ rehome/
             ├── +page.svelte        ← landing: give or get help
             └── (app)/              ← task pages share a narrow layout
                 ├── +layout.svelte
-                ├── donate/+page.svelte
-                ├── request/+page.svelte
-                └── feed/+page.svelte   ← full-screen activity feed for the demo laptop
+                ├── donate/+page.svelte      ← photo/text → sell (quote, list on Shopstr) or donate
+                ├── request/+page.svelte     ← need → matches → claim
+                ├── marketplace/+page.svelte ← listings + "simulate 30 days"
+                └── feed/+page.svelte        ← impact dashboard + activity feed for the demo laptop
 ```
 
 ## Run it
@@ -137,9 +149,15 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
-The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
+The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`) from `frontend/.env` (copy `frontend/.env.example`).
 
-**Two laptops (app + feed screen):** run the backend with `--host 0.0.0.0`, then in `.env` set `PUBLIC_BASE_URL=http://<backend laptop's IP>:8000` (so photo links work from the other laptop) and add the frontend's origin to `CORS_ORIGINS`.
+**Two laptops (app + feed screen):** laptop 1 runs everything; laptop 2 only opens a browser.
+1. Laptop 1, backend: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. In `rehome/.env` set `PUBLIC_BASE_URL=http://<laptop 1 IP>:8000` (photo links) and add `http://<laptop 1 IP>:5173` to `CORS_ORIGINS`.
+2. Laptop 1, frontend: in `frontend/.env` set `PUBLIC_API_URL=http://<laptop 1 IP>:8000`, then `npm run dev -- --host`.
+3. Laptop 2: open `http://<laptop 1 IP>:5173/feed`.
+If laptop 1's firewall asks, allow Python and Node on private networks. Find the IP with `ipconfig` (Windows) or `ipconfig getifaddr en0` (macOS).
+
+**Between rehearsals:** `POST /api/admin/reset` then `POST /api/admin/seed` (both in `/docs`). If you restart the backend instead, reload `/feed` and the landing page.
 
 ## Working together
 
@@ -149,7 +167,7 @@ The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ## Before the model is wired up
 
-With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
+With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Each provider stubs on its own: no `GEMINI_API_KEY` → keyword parser; no `MODAL_ENDPOINT_URL` → stub requester, pricing, reasons, and embeddings. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
 The in-memory DB resets when the backend restarts. Between demo rehearsals, either restart it or call `POST /api/admin/reset` (closes any live listings first, clears the inventory, keeps the activity feed), then seed again.
 
@@ -220,7 +238,8 @@ Disclosed per HackGB rules.
 | Tool / API | What we used it for |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
-| [Modal](https://modal.com) | Hosts the vision + text model and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
+| [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [eBay Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) | Active listings as pricing comps for the Sell path (`EBAY_APP_ID`, `EBAY_CERT_ID`); prices shown as "currently listed for". Without keys, Sell uses a category × condition estimate. |
 | [nostr-sdk](https://pypi.org/project/nostr-sdk/) (rust-nostr Python bindings) | Builds and signs NIP-99 classified listings (kind 30402) and sends them to relays |
 | [Nostr](https://nostr.com) relays + [Shopstr](https://shopstr.store) | Public marketplace where listed items appear; NIP-99 is an open standard, so no API key or developer approval is needed |
-| Google Gemini *(optional)* | Alternative model provider if credits arrive (`GEMINI_API_KEY`) |

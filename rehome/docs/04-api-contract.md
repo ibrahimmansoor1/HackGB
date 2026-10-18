@@ -58,9 +58,9 @@ This file is the contract between frontend and backend. Change it here first.
   "options": ["sell", "donate"]
 }
 ```
-Nothing is written to `items` yet.
+Nothing is written to `items` yet. `image_url` is the first photo (`null` without one). Drafts expire 24 h after parsing.
 
-**Errors:** `400` neither images nor text (blank text counts as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip`.
+**Errors:** `400` neither images nor text (blank text and empty files count as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip` · `502` parser model failed.
 
 ---
 
@@ -96,7 +96,7 @@ No request body.
 ```json
 { "pickup_zip": "54311" }
 ```
-`pickup_zip` is optional; defaults to the draft's `zip`.
+The body is optional, and so is `pickup_zip`; it defaults to the draft's `zip`.
 
 **Response `201`:**
 ```json
@@ -104,13 +104,13 @@ No request body.
 ```
 The draft is consumed.
 
-**Errors:** `404` unknown or already-used draft.
+**Errors:** `404` unknown, expired, or already-used draft.
 
 ---
 
 ## `POST /api/items` — one-step donate *(legacy shortcut)*
 
-Same multipart fields as `/parse` (single `image` + `note`), parses and donates in one call, returns the full `Item`. Kept so existing tests and the scaffold frontend keep working; **remove once the frontend uses `/parse` + `/donate`.**
+Same multipart fields as `/parse` (single `image` + `note`), parses and donates in one call, returns the full `Item`. Same errors as `/parse`. Kept so existing tests and the scaffold frontend keep working; **remove once the frontend uses `/parse` + `/donate`.**
 
 ---
 
@@ -181,7 +181,7 @@ If nothing clears the threshold: `"status": "open"`, `"matches": []`.
 ```
 Exchange method is undecided; for now `handoff.method` is always `"pickup"` and notification is an event only. The request becomes `closed`.
 
-**Errors:** `404` unknown request, or the item wasn't one of its matches · `409` item no longer `available`.
+**Errors:** `404` unknown request, or the item wasn't one of its matches · `409` item no longer `available` (reserved by someone else, listed, or being listed), or the request is already `closed`.
 
 ---
 
@@ -215,7 +215,7 @@ Reads `impact_hourly` (continuous aggregate).
   "hourly": [ { "bucket": "2026-10-18T13:00:00Z", "event_type": "item_donated", "n": 6 } ]
 }
 ```
-`totals` keys are the `event_type` values, pluralized. `hourly` covers the last 24 h.
+`totals` keys are the `event_type` values, pluralized; all six are always present (all time). `by_category` is sorted by `items_donated`, most first. `hourly` covers the last 24 h, summed over categories, oldest first. Without `DATABASE_URL` the same numbers come from the in-memory events.
 
 ---
 
@@ -236,11 +236,14 @@ Loads the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` i
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
 
-**Open (owner: ibrahim):** how a sell draft reaches `/list` (see docs/02).
+**Sell path:** after `POST /api/items/{draft_id}/sell`, list the draft directly with `POST /api/items/{draft_id}/list` (below). The same path takes an `items` id to list an existing available item.
 
 ### `POST /api/items/{id}/list`
 
-No request body.
+`{id}` is an available item (`itm_…`) or a sell draft (`drf_…`). Optional body: `{ "price": 45 }` (USD, > 0), the seller's price, typically picked from the `/sell` quote; without it, the category × condition default is used.
+
+- **Draft:** the draft is consumed and becomes an item (event "Saved itm_x to sell", **not** `item_donated`), then listed. `404` unknown, expired, or already-used draft.
+- **Item:** must be `available`.
 
 **Response `200`:**
 ```json

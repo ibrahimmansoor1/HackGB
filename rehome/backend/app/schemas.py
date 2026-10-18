@@ -2,7 +2,7 @@
 If these disagree with the docs, the docs win."""
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Category = Literal["outerwear", "tops", "bottoms", "footwear", "accessories",
                    "home", "electronics", "kids", "other"]
@@ -15,6 +15,7 @@ class ParsedItem(BaseModel):
     """Parser agent output (D3)."""
     category: Category
     item: str
+    brand: Optional[str] = None     # from a visible tag or the donor's text; never guessed
     color: str
     size: Optional[str] = None
     condition: Condition
@@ -25,7 +26,7 @@ class ParsedItem(BaseModel):
 
 class StructuredQuery(BaseModel):
     """Requester agent output (R3)."""
-    need: str
+    needs: list[str] = Field(min_length=1)
     inferred_context: list[str] = Field(default_factory=list)
     must_have: list[str] = Field(default_factory=list)
     nice_to_have: list[str] = Field(default_factory=list)
@@ -44,6 +45,66 @@ class Item(ParsedItem):
     created_at: datetime
 
 
+class DraftOut(BaseModel):
+    """POST /api/items/parse: parsed, not stored as an item until the donor chooses."""
+    draft_id: str
+    item: ParsedItem
+    image_url: Optional[str] = None
+    options: list[Literal["sell", "donate"]] = ["sell", "donate"]
+
+
+class DonateIn(BaseModel):
+    pickup_zip: Optional[str] = None   # defaults to the draft's zip
+
+
+class DonateOut(BaseModel):
+    item_id: str
+    status: ItemStatus
+    message: str
+
+
+class Price(BaseModel):
+    low: float = Field(gt=0)
+    high: float = Field(gt=0)
+    currency: Literal["USD"] = "USD"
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if self.low > self.high:
+            raise ValueError("low must not exceed high")
+        return self
+
+
+class Comp(BaseModel):
+    title: str
+    price: float
+    condition: Optional[str] = None
+    source: Literal["ebay"] = "ebay"
+    url: str
+
+
+class ListingDraft(BaseModel):
+    title: str
+    description: str
+
+    @field_validator("title")
+    @classmethod
+    def _max_80(cls, v: str) -> str:
+        return v.strip()[:80]
+
+
+class PriceQuote(BaseModel):
+    """Pricing agent output (S5)."""
+    suggested_price: Price
+    comps: list[Comp] = Field(default_factory=list)
+    listing_draft: ListingDraft
+
+
+class SellOut(PriceQuote):
+    draft_id: str
+    basis: Literal["active listings", "estimate"]
+
+
 class RequestIn(BaseModel):
     text: str
     zip: str
@@ -52,6 +113,7 @@ class RequestIn(BaseModel):
 
 class Match(BaseModel):
     item_id: str
+    title: str                  # item's `item`, brand prefixed when known
     rank: int
     score: float
     reason: str
@@ -63,6 +125,25 @@ class RequestOut(BaseModel):
     status: Literal["open", "matched", "closed"]
     query: StructuredQuery
     matches: list[Match]
+
+
+class AcceptIn(BaseModel):
+    request_id: str
+    item_id: str
+
+
+class Handoff(BaseModel):
+    method: Literal["pickup"] = "pickup"   # exchange method undecided (docs/02)
+    zip: str
+    message: str
+
+
+class AcceptOut(BaseModel):
+    match_id: str
+    item_id: str
+    status: Literal["reserved"] = "reserved"
+    donor_notified: bool
+    handoff: Handoff
 
 
 class Listing(BaseModel):
@@ -86,6 +167,11 @@ class ListingWithItem(Listing):
     item: Item
 
 
+class ListIn(BaseModel):
+    """Optional body for POST /api/items/{id}/list: the seller's price (USD)."""
+    price: Optional[float] = Field(None, gt=0, le=100000)
+
+
 class ListItemOut(BaseModel):
     item: Item
     listing: Listing
@@ -93,6 +179,25 @@ class ListItemOut(BaseModel):
 
 class ExpiryOut(BaseModel):
     expired: list[str]
+
+
+class CategoryImpact(BaseModel):
+    category: str
+    items_donated: int = 0
+    matches_accepted: int = 0
+
+
+class HourlyImpact(BaseModel):
+    bucket: datetime
+    event_type: str
+    n: int
+
+
+class ImpactOut(BaseModel):
+    """GET /api/impact. totals keys = event_type values, pluralized."""
+    totals: dict[str, int]
+    by_category: list[CategoryImpact]
+    hourly: list[HourlyImpact]     # last 24 h
 
 
 class AgentEvent(BaseModel):

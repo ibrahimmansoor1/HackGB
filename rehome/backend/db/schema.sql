@@ -10,6 +10,18 @@ CREATE SEQUENCE IF NOT EXISTS item_seq;
 CREATE SEQUENCE IF NOT EXISTS request_seq;
 CREATE SEQUENCE IF NOT EXISTS match_seq;
 CREATE SEQUENCE IF NOT EXISTS listing_seq;
+CREATE SEQUENCE IF NOT EXISTS draft_seq;
+
+-- Parsed uploads waiting for the donor to choose sell or donate.
+CREATE TABLE IF NOT EXISTS drafts (
+  id TEXT PRIMARY KEY,
+  donor_id TEXT NOT NULL,
+  zip TEXT,
+  note TEXT,
+  image_url TEXT,
+  item JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,

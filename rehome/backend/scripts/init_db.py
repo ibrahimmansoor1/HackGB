@@ -16,8 +16,8 @@ from app.core import config  # noqa: E402
 SCHEMA = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
 RESET = """
 DROP MATERIALIZED VIEW IF EXISTS impact_hourly CASCADE;
-DROP TABLE IF EXISTS listings, matches, requests, items, events CASCADE;
-DROP SEQUENCE IF EXISTS item_seq, request_seq, match_seq, listing_seq;
+DROP TABLE IF EXISTS listings, matches, requests, items, events, drafts CASCADE;
+DROP SEQUENCE IF EXISTS item_seq, request_seq, match_seq, listing_seq, draft_seq;
 -- Leftovers if the service was first set up with the shayan-branch schema.
 DROP TABLE IF EXISTS agent_events CASCADE;
 DROP SEQUENCE IF EXISTS item_id_seq, request_id_seq, listing_id_seq;
@@ -39,7 +39,7 @@ def statements(sql: str) -> list[str]:
 def main() -> None:
     if not config.DATABASE_URL:
         sys.exit("DATABASE_URL is not set in .env")
-    sql = SCHEMA.read_text().replace("{EMBED_DIM}", str(config.EMBED_DIM))
+    sql = SCHEMA.read_text(encoding="utf-8").replace("{EMBED_DIM}", str(config.EMBED_DIM))
     with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         if "--reset" in sys.argv:
             for stmt in statements(RESET):

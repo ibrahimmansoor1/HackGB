@@ -6,6 +6,7 @@ when DATABASE_URL is set. Create the tables first: python scripts/init_db.py
 import math
 from datetime import datetime, timezone
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from app.core import config
 
@@ -95,6 +96,31 @@ def new_listing_id() -> str:
     return f"lst_{_next('listing_seq'):04d}"
 
 
+def new_draft_id() -> str:
+    return f"drf_{_next('draft_seq'):04d}"
+
+
+# ---- drafts ----------------------------------------------------------------
+_DRAFT_SELECT = "id, donor_id, zip, note, image_url, item, created_at"
+
+
+def insert_draft(row: dict) -> dict:
+    _run("""INSERT INTO drafts (id, donor_id, zip, note, image_url, item, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+         (row["id"], row["donor_id"], row["zip"], row.get("note"), row.get("image_url"),
+          Jsonb(row["item"]), row["created_at"]))
+    return row
+
+
+def get_draft(draft_id: str) -> dict | None:
+    return _one(f"SELECT {_DRAFT_SELECT} FROM drafts WHERE id = %s", (draft_id,))
+
+
+def pop_draft(draft_id: str) -> dict | None:
+    """Atomic: two concurrent donates of one draft can't both get it."""
+    return _one(f"DELETE FROM drafts WHERE id = %s RETURNING {_DRAFT_SELECT}", (draft_id,))
+
+
 # ---- items -----------------------------------------------------------------
 def insert_item(row: dict) -> dict:
     extra = {"embedding": ("%s::vector", _vec(row["embedding"]))} if row.get("embedding") else {}
@@ -134,12 +160,32 @@ def vector_search(query_vec: list[float], top_k: int,
 
 # ---- requests & matches ----------------------------------------------------
 def insert_request(row: dict) -> dict:
-    row = dict(row)
-    if "needs" not in row and row.get("need"):
-        row["needs"] = [row["need"]]   # StructuredQuery.need -> needs (docs/03)
     extra = {"embedding": ("%s::vector", _vec(row["embedding"]))} if row.get("embedding") else {}
     _insert("requests", REQUEST_COLS, row, extra)
     return row
+
+
+def get_request(request_id: str) -> dict | None:
+    return _one(f"SELECT {', '.join(REQUEST_COLS)} FROM requests WHERE id = %s", (request_id,))
+
+
+def update_request_status(request_id: str, status: str) -> None:
+    _run("UPDATE requests SET status = %s WHERE id = %s", (status, request_id))
+
+
+def get_match(request_id: str, item_id: str) -> dict | None:
+    return _one("""SELECT id, request_id, item_id, score, rank, reason, status FROM matches
+                   WHERE request_id = %s AND item_id = %s""", (request_id, item_id))
+
+
+def update_match_status(match_id: str, status: str) -> None:
+    _run("UPDATE matches SET status = %s WHERE id = %s", (status, match_id))
+
+
+def reserve_item(item_id: str) -> bool:
+    """available -> reserved atomically; False if someone else got it first."""
+    return _one("""UPDATE items SET status = 'reserved'
+                   WHERE id = %s AND status = 'available' RETURNING id""", (item_id,)) is not None
 
 
 def insert_matches(rows: list[dict]) -> None:
@@ -184,6 +230,11 @@ def insert_event(row: dict) -> dict:
                 row.get("item_id"), row.get("request_id"), row.get("category"), row["message"]))
     row["id"] = out["id"]
     return row
+
+
+def impact_rows() -> list[dict]:
+    """The continuous aggregate (real-time, so the newest events are included)."""
+    return _all("SELECT bucket, event_type, category, n FROM impact_hourly")
 
 
 def list_events(after: int = 0, limit: int = 50) -> list[dict]:

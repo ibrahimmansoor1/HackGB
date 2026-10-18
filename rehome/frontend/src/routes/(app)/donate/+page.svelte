@@ -1,78 +1,121 @@
 <script>
-  import { donateItem, listItem } from '$lib/api.js';
-  import ListingInfo from '$lib/ListingInfo.svelte';
+  import { parseItem, sellDraft, donateDraft, listItem } from '$lib/api.js';
   import { takePendingPhoto } from '$lib/pending.js';
+  import ListingInfo from '$lib/ListingInfo.svelte';
 
   // A photo picked on the landing page arrives here ready to go.
-  let image = $state(takePendingPhoto());
+  const pending = takePendingPhoto();
+  let images = $state(pending ? [pending] : []);
   let preview = $state(null);
-  let note = $state('');
+  let text = $state('');
   let zip = $state('');
-  let loading = $state(false);
+  let loading = $state('');
   let error = $state('');
-  let item = $state(null);
-  let listing = $state(null);
-  let listingBusy = $state(false);
-  let listingError = $state('');
+  let draft = $state(null);
+  let donated = $state(null);
+  let quote = $state(null);
+  let price = $state(null);
+  let sold = $state(null);   // { item, listing } once it's listed
 
   $effect(() => {
-    if (!image) { preview = null; return; }
-    const url = URL.createObjectURL(image);
+    if (!images.length) { preview = null; return; }
+    const url = URL.createObjectURL(images[0]);
     preview = url;
     return () => URL.revokeObjectURL(url);
   });
 
-  async function submit() {
-    if (!image && !note) { error = 'Add a photo or a short description.'; return; }
-    if (!zip) { error = 'Add your zip code.'; return; }
-    loading = true; error = ''; item = null; listing = null; listingError = '';
-    try { item = await donateItem({ image, note, zip }); }
+  async function run(label, fn) {
+    loading = label; error = '';
+    try { await fn(); }
     catch (e) { error = e.message; }
-    finally { loading = false; }
+    finally { loading = ''; }
   }
 
-  // Selling instead: list the saved item on Nostr (shows on Shopstr).
-  async function sell() {
-    listingBusy = true; listingError = '';
-    try { ({ item, listing } = await listItem(item.id)); }
-    catch (e) { listingError = e.message; }
-    finally { listingBusy = false; }
+  function describe() {
+    if (!images.length && !text) { error = 'Add a photo or a short description.'; return; }
+    if (!zip) { error = 'Add your zip code.'; return; }
+    draft = null; donated = null; quote = null; sold = null;
+    run('Describing your item…', async () => { draft = await parseItem({ images, text, zip }); });
+  }
+
+  function sell() {
+    run('Checking prices…', async () => {
+      quote = await sellDraft(draft.draft_id);
+      const p = quote.suggested_price;
+      price = Math.round((p.low + p.high) / 2);
+    });
+  }
+
+  function list() {
+    if (!(price > 0)) { error = 'Pick a price above $0.'; return; }
+    run('Listing on Shopstr…', async () => { sold = await listItem(draft.draft_id, price); });
+  }
+
+  function donate() {
+    run('Donating…', async () => { donated = await donateDraft(draft.draft_id); });
+  }
+
+  function startOver() {
+    draft = null; donated = null; quote = null; sold = null; price = null; images = []; text = '';
   }
 </script>
 
 <h1>Give something</h1>
 
-<label for="photo">Photo</label>
-<input id="photo" type="file" accept="image/*" capture="environment"
-  onchange={(e) => (image = e.currentTarget.files?.[0] ?? null)} />
-{#if preview && !item}<img src={preview} alt="Preview of what you are giving" width="160" />{/if}
+{#if !draft}
+  <label for="photo">Photos</label>
+  <input id="photo" type="file" accept="image/*" capture="environment" multiple
+    onchange={(e) => (images = [...(e.currentTarget.files ?? [])])} />
+  {#if preview}<img src={preview} alt="Preview of what you are giving" width="160" class="mt-2 rounded-lg" />{/if}
 
-<label for="note">Anything we should know? (optional)</label>
-<textarea id="note" rows="2" bind:value={note} placeholder="Barely worn, size M"></textarea>
+  <label for="text">Anything we should know? (optional)</label>
+  <textarea id="text" rows="2" bind:value={text} placeholder="Barely worn, size M"></textarea>
 
-<label for="zip">Zip code</label>
-<input id="zip" bind:value={zip} inputmode="numeric" maxlength="5" />
+  <label for="zip">Zip code</label>
+  <input id="zip" bind:value={zip} inputmode="numeric" maxlength="5" />
 
-<button onclick={submit} disabled={loading}>{loading ? 'Describing your item…' : 'Give item'}</button>
+  <button onclick={describe} disabled={!!loading}>{loading || 'Describe my item'}</button>
+{:else}
+  {@const it = draft.item}
+  <h2>{it.color} {it.brand ? `${it.brand} ` : ''}{it.item}</h2>
+  {#if draft.image_url}<img src={draft.image_url} alt={it.summary} width="240" class="rounded-lg" />{/if}
+  <p>{it.summary}</p>
+  <p>{it.attributes.join(', ')} · {it.condition}{it.size ? ` · size ${it.size}` : ''}</p>
 
-{#if error}<p role="alert">{error}</p>{/if}
-
-{#if item}
-  <h2>Saved: {item.color} {item.item}</h2>
-  {#if item.image_url}<img src={item.image_url} alt={item.summary} width="240" />{/if}
-  <p>{item.summary}</p>
-  <p>{item.attributes.join(', ')} · {item.condition}{item.size ? ` · size ${item.size}` : ''}</p>
-
-  {#if listing}
+  {#if donated}
+    <p role="status">{donated.message}</p>
+    <button onclick={startOver}>Give something else</button>
+  {:else if sold}
     <h2>For sale</h2>
-    <ListingInfo {listing} />
+    <ListingInfo listing={sold.listing} />
     <p class="text-sm text-ink-soft">If it doesn't sell in 30 days, it goes back to the donation pool.
       See all listings on the <a class="underline" href="/marketplace">marketplace</a>.</p>
-  {:else if item.status === 'available'}
-    <p class="text-ink-soft">It's ready for someone nearby. Or sell it instead:</p>
-    <button onclick={sell} disabled={listingBusy}>
-      {listingBusy ? 'Listing on Shopstr…' : 'List on Shopstr'}
-    </button>
-    {#if listingError}<p role="alert">{listingError}</p>{/if}
+    <button onclick={startOver}>Give something else</button>
+  {:else}
+    {#if quote}
+      {@const p = quote.suggested_price}
+      <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for' : 'Estimated value'}:
+        ${p.low}–${p.high}</h3>
+      {#if quote.comps.length}
+        <ul>
+          {#each quote.comps as c (c.url)}
+            <li><a href={c.url} target="_blank" rel="noopener noreferrer">{c.title}</a> · ${c.price}{c.condition ? ` · ${c.condition}` : ''}</li>
+          {/each}
+        </ul>
+      {/if}
+      <p><strong>{quote.listing_draft.title}</strong><br />{quote.listing_draft.description}</p>
+
+      <label for="price">Your price (USD)</label>
+      <input id="price" type="number" min="1" step="1" bind:value={price} class="!w-32" />
+      <button onclick={list} disabled={!!loading}>List on Shopstr</button>
+      <p class="text-sm text-ink-soft">Not worth the hassle? You can still donate it.</p>
+    {:else}
+      <button onclick={sell} disabled={!!loading}>Sell it</button>
+    {/if}
+    <button onclick={donate} disabled={!!loading}>Donate it</button>
+    <button onclick={startOver} disabled={!!loading}>Start over</button>
+    {#if loading}<p role="status">{loading}</p>{/if}
   {/if}
 {/if}
+
+{#if error}<p role="alert">{error}</p>{/if}

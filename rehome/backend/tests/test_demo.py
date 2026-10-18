@@ -132,8 +132,8 @@ def test_chicago_request_matches_insulated_outerwear():
     for m in matches:
         assert 0 < m["score"] <= 1 and m["reason"] and len(m["reason"].split()) <= 12
     assert "built for sub-freezing winters" in matches[0]["reason"]
-    reserved = client.get("/api/items?status=reserved").json()["items"]
-    assert [i["id"] for i in reserved] == [matches[0]["item_id"]]
+    assert all(m["title"] == m["item"]["item"] for m in matches)    # seed items have no brand
+    assert client.get("/api/items?status=reserved").json()["items"] == []   # reserve on accept
 
 
 def test_donated_jacket_is_matched_in_the_demo():
@@ -178,7 +178,9 @@ def test_feed_shows_every_docs05_step():
     start = _last_event_id()
     item_id = client.post("/api/items", data={"zip": "54301", "note": "Black puffer jacket, size M"}
                           ).json()["id"]
-    client.post("/api/requests", json=CHICAGO)
+    req = client.post("/api/requests", json=CHICAGO).json()
+    top = req["matches"][0]["item_id"]
+    client.post("/api/matches/accept", json={"request_id": req["request_id"], "item_id": top})
     spare = client.get("/api/items?status=available").json()["items"][0]["id"]
     client.post(f"/api/items/{spare}/list")
     client.post("/api/admin/simulate-expiry")
@@ -188,7 +190,7 @@ def test_feed_shows_every_docs05_step():
     assert all(e["id"] > start for e in events)
     by_agent = {(e["agent"], e["message"]) for e in events}
     msgs = [m for _, m in by_agent]
-    steps = [("orchestrator", "New donation received"),
+    steps = [("orchestrator", "New item received"),
              ("parser", "Identified black puffer jacket, size M"),
              ("orchestrator", f"Saved {item_id} as available"),
              ("orchestrator", "New request from 60601")]
@@ -197,7 +199,8 @@ def test_feed_shows_every_docs05_step():
     assert any(a == "requester" and m.startswith("Inferred sub-freezing winters, snow; needs "
                                                  "insulated, water-resistant") for a, m in by_agent)
     assert any(re.fullmatch(r"Found \d+ candidates", m) for m in msgs)
-    assert any(re.fullmatch(r"Matched itm_\d+ \(0\.\d+\) and reserved it", m) for m in msgs)
+    assert any(re.fullmatch(r"Top match itm_\d+ \(0\.\d+\)", m) for m in msgs)
+    assert any(re.fullmatch(rf"{top} reserved; donor notified, pickup in \d{{5}}", m) for m in msgs)
     assert any(m.startswith(f"Priced {spare} at $") for m in msgs)
     assert f"Listed {spare} on Shopstr (dry run)" in msgs
     assert f"30 days unsold — {spare} moved to donation pool" in msgs
@@ -227,10 +230,13 @@ def test_list_a_seeded_item_dry_run():
 
 
 def test_matched_items_list_unless_reserved():
-    """Rank 1 is reserved for the requester (409); the other matches stay listable."""
+    """The accepted match is reserved (409 to list); the other matches stay listable."""
     client.post("/api/admin/seed")
-    matches = client.post("/api/requests", json=CHICAGO).json()["matches"]
+    req = client.post("/api/requests", json=CHICAGO).json()
+    matches = req["matches"]
     assert len(matches) >= 2
+    client.post("/api/matches/accept",
+                json={"request_id": req["request_id"], "item_id": matches[0]["item_id"]})
     assert client.post(f"/api/items/{matches[0]['item_id']}/list").status_code == 409
     assert client.post(f"/api/items/{matches[1]['item_id']}/list").status_code == 200
 
@@ -312,7 +318,7 @@ def test_routers_never_import_the_db():
     """SOURCE_OF_TRUTH rule 1: only the orchestrator touches the database."""
     routers = Path(__file__).resolve().parents[1] / "app" / "routers"
     for f in routers.glob("*.py"):
-        src = f.read_text()
+        src = f.read_text(encoding="utf-8")   # Windows defaults to cp1252
         assert not re.search(r"from app\.core import[^\n]*\bdb\b|import app\.core\.db", src), f.name
 
 
@@ -328,9 +334,9 @@ def test_word_sizes_are_normalized():
     assert stub_rules.find_size("size L") == "L"
 
 
-def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
+def test_item_listed_during_reason_call_is_not_matched(monkeypatch):
     """With a real model the reasons call is slow; an item listed meanwhile must
-    not be reserved too."""
+    not be suggested."""
     from app.agents import orchestrator
     client.post("/api/admin/seed")
     real = orchestrator._reasons
@@ -344,9 +350,7 @@ def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
     body = client.post("/api/requests", json=CHICAGO).json()
     listed = {i["id"] for i in client.get("/api/items?status=listed").json()["items"]}
     matched = {m["item_id"] for m in body["matches"]}
-    reserved = {i["id"] for i in client.get("/api/items?status=reserved").json()["items"]}
-    assert listed and not listed & matched and not listed & reserved
-    assert reserved <= matched
+    assert listed and matched and not listed & matched
 
 
 def test_seed_image_base_url_overrides_seed_photos(monkeypatch):
@@ -429,3 +433,32 @@ def test_seed_works_again_after_db_is_wiped_elsewhere():
     assert client.post("/api/admin/seed").json() == {"seeded": 18}
     db.reset()                                  # wiped outside the API
     assert client.post("/api/admin/seed").json() == {"seeded": 18}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("need a warm blanket for winter", "wool blanket"),
+    ("blanket, moving to Chicago in December", "wool blanket"),
+    ("pots and pans, moving to Chicago in December", "cookware set"),
+    ("space heater, moving to Chicago in December", "space heater"),
+])
+def test_home_goods_ignore_coat_requirements(text, expected):
+    """Cold context must not turn a blanket or heater request into outerwear."""
+    client.post("/api/admin/seed")
+    body = client.post("/api/requests", json={"text": text, "zip": "54301"}).json()
+    assert body["matches"] and body["matches"][0]["item"]["item"] == expected
+
+
+@pytest.mark.parametrize("text,clim", [
+    ("it's freezing and the heat is out", "cold"),
+    ("heat got shut off this winter", "cold"),
+    ("no heat, need a space heater", None),
+    ("coat for Chicago in July", "hot"),
+])
+def test_climate_words(text, clim):
+    assert stub_rules.climate(text, "") == clim
+
+
+@pytest.mark.parametrize("text", ["one size fits all beanie", "comes in all sizes",
+                                  "oversized hoodie", "right-sized desk"])
+def test_size_words_are_not_sizes(text):
+    assert stub_rules.find_size(text) is None

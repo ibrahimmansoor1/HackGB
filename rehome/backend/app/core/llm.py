@@ -1,8 +1,9 @@
 """Model client. Everything that calls an LLM or embedding model goes
 through here, so switching Modal <-> Gemini is a one-file change.
 
-Assumes the Modal endpoint is OpenAI-compatible (vLLM-style /chat/completions
-and /embeddings). Adjust if your deployment differs.
+Modal (requester, pricing, reasons, embeddings) is assumed OpenAI-compatible
+(vLLM-style /chat/completions and /embeddings); adjust if your deployment
+differs. Gemini (input parser) uses the generateContent REST API.
 """
 import base64
 import hashlib
@@ -43,6 +44,31 @@ async def complete_json(system: str, user_text: str,
                               json=payload, headers=_headers())
         r.raise_for_status()
     text = r.json()["choices"][0]["message"]["content"]
+    return json.loads(_strip_fences(text))
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+async def gemini_json(system: str, user_text: str,
+                      images: list[tuple[bytes, str]] | None = None) -> dict | list:
+    """Call Gemini with text + (bytes, mime) images and parse its JSON reply."""
+    parts: list[dict] = [{"text": user_text}]
+    for data, mime in images or []:
+        parts.append({"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode()}})
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(GEMINI_URL.format(model=config.GEMINI_MODEL), json=payload,
+                              headers={"x-goog-api-key": config.GEMINI_API_KEY})
+        r.raise_for_status()
+    try:
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError) as e:   # blocked by safety filters, or empty
+        raise ValueError(f"Gemini returned no text: {r.text[:200]}") from e
     return json.loads(_strip_fences(text))
 
 

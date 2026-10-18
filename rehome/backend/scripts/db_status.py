@@ -30,7 +30,7 @@ FOREIGN_TABLES = {"agent_events": "an older schema version (agent_events instead
 
 def expected_schema() -> dict[str, set[str]]:
     """Table -> columns, parsed from the CREATE TABLE blocks in db/schema.sql."""
-    sql = SCHEMA_SQL.read_text()
+    sql = SCHEMA_SQL.read_text(encoding="utf-8")
     tables: dict[str, set[str]] = {}
     for name, body in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.S):
         cols = set()
@@ -87,7 +87,7 @@ def main() -> int:
                     if t in actual and cols - actual[t]}
     # init_db.py adds only the columns schema.sql ALTERs in; anything else needs --reset.
     alterable = {t: set(c for tt, c in re.findall(
-        r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)", SCHEMA_SQL.read_text()) if tt == t)
+        r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)", SCHEMA_SQL.read_text(encoding="utf-8")) if tt == t)
         for t in expected}
     needs_reset = {t: [c for c in cols if c not in alterable[t]] for t, cols in missing_cols.items()}
     needs_reset = {t: c for t, c in needs_reset.items() if c}

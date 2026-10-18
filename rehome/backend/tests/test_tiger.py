@@ -32,7 +32,7 @@ def pg():
         conn.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
         conn.execute(f"CREATE SCHEMA {SCHEMA}")
         conn.execute(f"SET search_path = {SCHEMA}, public")
-        sql = Path(SQL_FILE).read_text().replace("{EMBED_DIM}", str(DIM))
+        sql = Path(SQL_FILE).read_text(encoding="utf-8").replace("{EMBED_DIM}", str(DIM))
         for stmt in statements(sql):
             # Plain Postgres (no TimescaleDB) can still test everything else.
             if not has_timescale and ("timescale" in stmt or "hypertable" in stmt
@@ -106,7 +106,7 @@ def test_requests_and_matches(pg):
     item_id = _item(pg, _vec(3))
     req_id = pg.new_request_id()
     pg.insert_request({"id": req_id, "requester_id": "r", "raw_text": "coat", "zip": "60601",
-                       "need": "winter coat", "inferred_context": ["snow"],
+                       "needs": ["winter coat"], "inferred_context": ["snow"],
                        "must_have": ["insulated"], "nice_to_have": [], "size": None,
                        "search_text": "insulated coat", "embedding": _vec(3),
                        "status": "matched", "created_at": pg.now()})
@@ -118,6 +118,16 @@ def test_requests_and_matches(pg):
                          (req_id,)).fetchone()
     assert req["needs"] == ["winter coat"]
     assert m["id"].startswith("mat_") and m["rank"] == 1
+
+    assert pg.get_request(req_id)["status"] == "matched" and pg.get_request("req_x") is None
+    match = pg.get_match(req_id, item_id)
+    assert match["id"] == m["id"] and pg.get_match(req_id, "itm_x") is None
+    assert pg.reserve_item(item_id) is True
+    assert pg.reserve_item(item_id) is False          # already reserved
+    pg.update_match_status(match["id"], "accepted")
+    pg.update_request_status(req_id, "closed")
+    assert pg.get_match(req_id, item_id)["status"] == "accepted"
+    assert pg.get_request(req_id)["status"] == "closed"
 
 
 def test_listings(pg):
@@ -134,6 +144,32 @@ def test_listings(pg):
     assert lst_id in [r["id"] for r in pg.list_listings("expired")]
     with pytest.raises(ValueError):
         pg.update_listing(lst_id, bogus=1)
+
+
+def test_drafts_roundtrip_and_pop_once(pg):
+    draft_id = pg.new_draft_id()
+    item = {"category": "outerwear", "item": "coat", "attributes": ["hooded"]}
+    pg.insert_draft({"id": draft_id, "donor_id": "d", "zip": "54311", "note": None,
+                     "image_url": None, "item": item, "created_at": pg.now()})
+    assert draft_id.startswith("drf_") and pg.get_draft(draft_id)["item"] == item
+    assert pg.pop_draft(draft_id)["zip"] == "54311"
+    assert pg.pop_draft(draft_id) is None and pg.get_draft(draft_id) is None
+
+
+def test_impact_aggregate_sees_fresh_events(pg):
+    with pg._db().connection() as conn:
+        has_view = conn.execute("SELECT to_regclass('impact_hourly') IS NOT NULL AS ok"
+                                ).fetchone()["ok"]
+    if not has_view:
+        pytest.skip("TimescaleDB not available")
+    before = sum(r["n"] for r in pg.impact_rows() if r["event_type"] == "match_accepted")
+    for _ in range(2):
+        pg.insert_event({"agent": "orchestrator", "message": "x", "event_type": "match_accepted",
+                         "category": "home", "created_at": pg.now()})
+    pg.insert_event({"agent": "orchestrator", "message": "untyped", "created_at": pg.now()})
+    rows = [r for r in pg.impact_rows() if r["event_type"] == "match_accepted"]
+    assert sum(r["n"] for r in rows) == before + 2     # real-time: no refresh needed
+    assert all(r["event_type"] is not None for r in pg.impact_rows())
 
 
 def test_events_feed_order_and_fields(pg):

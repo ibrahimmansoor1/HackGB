@@ -2,13 +2,14 @@
 Flows and ranking rules are specified in docs/02 and docs/05."""
 import asyncio
 from datetime import datetime, timedelta, timezone
-from app.agents import parser, requester, stub_rules
+from app.agents import parser, pricing, requester, stub_rules
 from app.agents.events import emit
 from app.core import config, db, llm
-from app.integrations import marketplace
+from app.integrations import ebay, marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
-from app.schemas import (AgentEvent, ExpiryOut, Item, Listing, ListingWithItem, ListItemOut,
-                         Match, ParsedItem, RequestOut)
+from app.schemas import (AcceptOut, AgentEvent, CategoryImpact, DonateOut, DraftOut, ExpiryOut,
+                         Handoff, HourlyImpact, ImpactOut, Item, Listing, ListingWithItem,
+                         ListItemOut, Match, ParsedItem, PriceQuote, RequestOut, SellOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -17,6 +18,7 @@ fits this request, or what it lacks. Return ONLY a JSON array of
 # Stub embeddings score much lower than real ones.
 THRESHOLD = 0.2 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
+DRAFT_TTL = timedelta(hours=24)   # an unsold, undonated draft expires after this
 _listing_now: set[str] = set()   # items being published; guards double-clicks and matching
 
 
@@ -32,6 +34,12 @@ def _public(row: dict) -> Item:
     return Item.model_validate({k: v for k, v in row.items() if k != "embedding"})
 
 
+def _label(p: ParsedItem) -> str:
+    """'black Columbia puffer jacket, size M' for feed messages."""
+    name = " ".join(w for w in (p.color, p.brand, p.item) if w)
+    return name + (f", size {p.size}" if p.size else "")
+
+
 def _embed_text(p: dict) -> str:
     return " ".join([p["summary"], *p["attributes"], p["item"], p["category"],
                      p.get("season") or ""]).strip()
@@ -42,6 +50,10 @@ def new_item_id() -> str:
     return db.new_item_id()
 
 
+def new_draft_id() -> str:
+    return db.new_draft_id()
+
+
 def items(status: str | None = None) -> list[Item]:
     return [_public(r) for r in db.list_items(status)]
 
@@ -50,32 +62,171 @@ def events(after: int = 0) -> list[AgentEvent]:
     return [AgentEvent.model_validate(e) for e in db.list_events(after)]
 
 
+IMPACT_TOTALS = {"item_parsed": "items_parsed", "item_donated": "items_donated",
+                 "price_quoted": "prices_quoted", "request_made": "requests_made",
+                 "match_made": "matches_made", "match_accepted": "matches_accepted"}
+
+
+def impact() -> ImpactOut:
+    """Dashboard stats from impact_hourly (docs/04)."""
+    totals = dict.fromkeys(IMPACT_TOTALS.values(), 0)
+    by_cat: dict[str, CategoryImpact] = {}
+    hourly: dict[tuple, int] = {}
+    since = (db.now() - timedelta(hours=24)).replace(minute=0, second=0, microsecond=0)
+    for r in db.impact_rows():
+        key = IMPACT_TOTALS.get(r["event_type"])
+        if key is None:
+            continue
+        totals[key] += r["n"]
+        if r["category"] and key in ("items_donated", "matches_accepted"):
+            cat = by_cat.setdefault(r["category"], CategoryImpact(category=r["category"]))
+            setattr(cat, key, getattr(cat, key) + r["n"])
+        if r["bucket"] >= since:
+            k = (r["bucket"], r["event_type"])
+            hourly[k] = hourly.get(k, 0) + r["n"]
+    return ImpactOut(
+        totals=totals,
+        by_category=sorted(by_cat.values(), key=lambda c: (-c.items_donated, c.category)),
+        hourly=[HourlyImpact(bucket=b, event_type=t, n=n) for (b, t), n in sorted(hourly.items())])
+
+
 def db_backend() -> str:
     """`tiger` or `memory`, for /api/health."""
     return db.BACKEND
 
 
-# ---- donor path: D1 -> D4 --------------------------------------------------
+# ---- donor path: D1 -> D4, then sell (S) or donate (N) ---------------------
+async def _parse(text: str | None, images: list[tuple[bytes, str]],
+                 item_id: str | None = None) -> ParsedItem:
+    emit("orchestrator", "New item received", item_id=item_id)
+    try:
+        parsed = await parser.parse_item(text, images)
+    except Exception as e:
+        emit("orchestrator", f"Couldn't read the item: {e}", item_id=item_id)
+        raise FlowError(502, f"The parser couldn't read this item: {e}") from e
+    emit("parser", f"Identified {_label(parsed)}", item_id=item_id,
+         event_type="item_parsed", category=parsed.category)
+    return parsed
+
+
+async def parse_draft(text: str | None, zip_code: str, donor_id: str,
+                      images: list[tuple[bytes, str]], image_url: str | None,
+                      draft_id: str) -> DraftOut:
+    """D1-D4: parse and keep it as a draft. Nothing goes to `items` yet."""
+    parsed = await _parse(text, images)
+    db.insert_draft({"id": draft_id, "donor_id": donor_id, "zip": zip_code, "note": text,
+                     "image_url": image_url, "item": parsed.model_dump(),
+                     "created_at": db.now()})
+    return DraftOut(draft_id=draft_id, item=parsed, image_url=image_url)
+
+
+def _get_draft(draft_id: str) -> dict:
+    row = db.get_draft(draft_id)
+    if row is None or db.now() - row["created_at"] > DRAFT_TTL:
+        raise FlowError(404, f"Draft {draft_id} not found, expired, or already used.")
+    return row
+
+
+async def sell_draft(draft_id: str) -> SellOut:
+    """S2-S5: eBay comps -> pricing agent; heuristic estimate when eBay can't help.
+    The draft is kept, so the donor can still donate it."""
+    item = _get_draft(draft_id)["item"]
+    found: list[dict] = []
+    if ebay.configured():
+        try:
+            found = await ebay.search(_comps_query(item))
+            emit("orchestrator", f"Found {len(found)} active eBay listings")
+        except ebay.EbayError as e:
+            emit("orchestrator", f"Couldn't reach eBay ({e}); using an estimate")
+
+    quote, basis = None, "estimate"
+    if found:
+        try:
+            quote = await pricing.quote(item, found)
+        except Exception as e:
+            emit("pricing", f"Pricing failed: {e}")
+            raise FlowError(502, f"The pricing model failed: {e}") from e
+        urls = {c["url"] for c in found}
+        quote.comps = [c for c in quote.comps if c.url in urls]   # only real listings
+        basis = "active listings" if quote.comps else "estimate"
+    if basis == "estimate":
+        quote = _estimate(item)
+
+    p = quote.suggested_price
+    label = "currently listed for" if basis == "active listings" else "estimate"
+    emit("pricing", f"Suggested ${p.low:g}–{p.high:g} ({label})",
+         event_type="price_quoted", category=item["category"])
+    return SellOut(draft_id=draft_id, basis=basis, **quote.model_dump())
+
+
+def _comps_query(item: dict) -> str:
+    return " ".join(w for w in (item.get("brand"), item["item"]) if w)
+
+
+def _estimate(item: dict) -> PriceQuote:
+    """docs/05 fallback: category x condition midpoint, +/- 20 %, no comps."""
+    mid = marketplace.suggest_price(item)
+    return PriceQuote.model_validate({
+        "suggested_price": {"low": max(1, round(mid * 0.8)), "high": max(1, round(mid * 1.2))},
+        "comps": [], "listing_draft": pricing.listing_draft(item)})
+
+
+async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
+    """N1-N3: embed, insert as available, consume the draft."""
+    row = _get_draft(draft_id)
+    parsed = ParsedItem.model_validate(row["item"])
+    vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
+    if db.pop_draft(draft_id) is None:                         # a double-click got it first
+        raise FlowError(404, f"Draft {draft_id} was already used.")
+    item_id = db.new_item_id()
+    item = await store(parsed, row["note"], (pickup_zip or "").strip() or row["zip"],
+                       row["donor_id"], row["image_url"], item_id, vec)
+    return DonateOut(item_id=item.id, status=item.status,
+                     message=f"Thanks! Your {parsed.item} is now searchable.")
+
+
+def is_draft_id(some_id: str) -> bool:
+    return some_id.startswith("drf_")
+
+
+async def list_draft(draft_id: str, price: float | None = None) -> ListItemOut:
+    """Sell side (owner: ibrahim): the donor chose to sell after seeing the quote.
+    The draft becomes an item and is listed on Nostr right away, at the donor's
+    price (else the category x condition default). It never counts as a donation.
+    If no relay accepts it (502), the item stays available, like /list."""
+    row = _get_draft(draft_id)
+    parsed = ParsedItem.model_validate(row["item"])
+    vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
+    if db.pop_draft(draft_id) is None:                         # a double-click got it first
+        raise FlowError(404, f"Draft {draft_id} was already used.")
+    item_id = db.new_item_id()
+    await store(parsed, row["note"], row["zip"], row["donor_id"], row["image_url"], item_id,
+                vec, for_sale=True)
+    return await list_item(item_id, price=price)
+
+
 async def donate(note: str | None, zip_code: str, donor_id: str,
                  image_bytes: bytes | None, image_mime: str,
                  image_url: str | None, item_id: str) -> Item:
-    emit("orchestrator", "New donation received", item_id=item_id)
-    parsed = await parser.parse_item(note, image_bytes, image_mime)
-    emit("parser", f"Identified {parsed.color} {parsed.item}"
-         + (f", size {parsed.size}" if parsed.size else ""), item_id=item_id,
-         event_type="item_parsed", category=parsed.category)
+    """Legacy one-step POST /api/items: parse + donate."""
+    parsed = await _parse(note, [(image_bytes, image_mime)] if image_bytes else [], item_id)
     return await store(parsed, note, zip_code, donor_id, image_url, item_id)
 
 
 async def store(parsed: ParsedItem, note: str | None, zip_code: str,
-                donor_id: str, image_url: str | None, item_id: str) -> Item:
-    vec = await llm.embed(_embed_text(parsed.model_dump()))
+                donor_id: str, image_url: str | None, item_id: str,
+                vec: list[float] | None = None, for_sale: bool = False) -> Item:
+    if vec is None:
+        vec = await llm.embed(_embed_text(parsed.model_dump()))
     row = {**parsed.model_dump(), "id": item_id, "donor_id": donor_id, "note": note,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}
     db.insert_item(row)
-    emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
-         event_type="item_donated", category=parsed.category)
+    if for_sale:   # about to be listed; not a donation (impact stats)
+        emit("orchestrator", f"Saved {item_id} to sell", item_id=item_id)
+    else:
+        emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
+             event_type="item_donated", category=parsed.category)
     return _public(row)
 
 
@@ -115,10 +266,10 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
 
     reasons = await _reasons(query, [r for r, _, _ in ranked])
     # The reasons call can take seconds with a real model; drop anything that
-    # got listed or reserved meanwhile so we never reserve an unavailable item.
+    # got listed or reserved meanwhile so we never suggest an unavailable item.
     ranked = [(row, score, final) for row, score, final in ranked
               if _still_available(row["id"])]
-    matches = [Match(item_id=row["id"], rank=i + 1, score=round(score, 3),
+    matches = [Match(item_id=row["id"], title=_title(row), rank=i + 1, score=round(score, 3),
                      reason=reasons.get(row["id"], "Similar to what you asked for"),
                      item=_public(row))
                for i, (row, score, _) in enumerate(ranked)]
@@ -130,15 +281,41 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     db.insert_matches([{"request_id": req_id, "item_id": m.item_id, "score": m.score,
                         "rank": m.rank, "reason": m.reason, "status": "suggested"}
                        for m in matches])
-    if matches:
-        db.update_item_status(matches[0].item_id, "reserved")
-        emit("orchestrator", f"Matched {matches[0].item_id} ({matches[0].score}) and reserved it",
+    if matches:   # suggestions only: nothing is reserved until accept
+        emit("orchestrator", f"Top match {matches[0].item_id} ({matches[0].score})",
              request_id=req_id, item_id=matches[0].item_id,
              event_type="match_made", category=matches[0].item.category)
     else:
         emit("orchestrator", "No good match yet; request left open", request_id=req_id)
 
     return RequestOut(request_id=req_id, status=status, query=query, matches=matches)
+
+
+async def accept_match(request_id: str, item_id: str) -> AcceptOut:
+    """A1-A2: claim one suggested match. Re-checks the item is still available."""
+    req = db.get_request(request_id)
+    if req is None:
+        raise FlowError(404, f"Request {request_id} not found.")
+    match = db.get_match(request_id, item_id)
+    if match is None:
+        raise FlowError(404, f"{item_id} isn't one of the matches for {request_id}.")
+    if req["status"] == "closed":
+        raise FlowError(409, f"Request {request_id} already has an accepted match.")
+    if item_id in _listing_now or not db.reserve_item(item_id):
+        raise FlowError(409, f"Item {item_id} is no longer available.")
+    db.update_match_status(match["id"], "accepted")
+    db.update_request_status(request_id, "closed")
+    row = db.get_item(item_id)
+    emit("orchestrator", f"{item_id} reserved; donor notified, pickup in {row['zip']}",
+         request_id=request_id, item_id=item_id, event_type="match_accepted",
+         category=row["category"])
+    return AcceptOut(match_id=match["id"], item_id=item_id, donor_notified=True,
+                     handoff=Handoff(zip=row["zip"], message="Reserved. The donor has been "
+                                     f"notified; pickup in {row['zip']}."))
+
+
+def _title(row: dict) -> str:
+    return f"{row['brand']} {row['item']}" if row.get("brand") else row["item"]
 
 
 def _still_available(item_id: str) -> bool:
@@ -208,7 +385,8 @@ async def reset_demo() -> dict:
 
 
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
-async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
+async def list_item(item_id: str, platform: str = "nostr",
+                    price: float | None = None) -> ListItemOut:
     row = db.get_item(item_id)
     if row is None:
         raise FlowError(404, f"Item {item_id} not found.")
@@ -218,9 +396,13 @@ async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
     channel = marketplace.get_channel(platform)
     _listing_now.add(item_id)
     try:
-        price = marketplace.suggest_price(row)
-        emit("orchestrator", f"Priced {item_id} at ${price} ({row['category']}, {row['condition']})",
-             item_id=item_id)
+        if price is None:
+            price = marketplace.suggest_price(row)
+            how = f"{row['category']}, {row['condition']}"
+        else:
+            price = round(float(price), 2)
+            how = "seller's price"
+        emit("orchestrator", f"Priced {item_id} at ${price:g} ({how})", item_id=item_id)
         try:
             result = await channel.publish(row, price)
         except Exception as e:
