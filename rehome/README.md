@@ -165,10 +165,10 @@ The in-memory DB resets when the backend restarts. Restart it between demo rehea
 
 ```bash
 pip install modal && modal setup     # once
-modal deploy infra/modal_llm.py      # prints the server URL
-modal run infra/modal_llm.py         # optional: waits for it, checks a tool call works
+modal deploy infra/modal_llm.py                  # prints the URL (https://<workspace>--rehome-llm-serve.us-east.modal.run)
+python infra/check_llm.py <URL>                  # warms it up, checks a tool call and an image
 ```
-In `.env`: `MODAL_ENDPOINT_URL=<URL>/v1`, `MODAL_VISION_MODEL=llm`, `MODAL_AGENT_MODEL=llm`. The first request after idle waits for a cold start (a few minutes); send one before the demo.
+In `.env`: `MODAL_ENDPOINT_URL=<URL>/v1`, `MODAL_VISION_MODEL=llm`, `MODAL_AGENT_MODEL=llm`. The first request after idle waits for a cold start (a few minutes; requests queue meanwhile), so run `check_llm.py` before the demo. It's a Modal web function on `modal.run` rather than an `@app.server` on `modal.direct`, because some campus networks block `modal.direct`.
 
 ## Database (Tiger Data)
 
