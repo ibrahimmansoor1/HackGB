@@ -49,7 +49,8 @@ rehome/
 │   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
 │   │   ├── nostr_keygen.py ← one-time Nostr key setup
-│   │   └── make_seed_images.py ← redraws static/seed/
+│   │   ├── make_seed_images.py ← redraws static/seed/
+│   │   └── smoke_test.py   ← calls every endpoint on a running server, PASS/FAIL
 │   └── tests/
 │       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
@@ -101,7 +102,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-API docs: http://localhost:8000/docs. Run the tests from `backend/` with the venv active: `python -m pytest`.
+API docs: http://localhost:8000/docs. Run the tests from `backend/` with the venv active: `python -m pytest`. To check every endpoint on the running server, open a second terminal in `backend/` (venv active) and run `python scripts/smoke_test.py`: it prints PASS/FAIL per endpoint.
 
 **Load the demo inventory** (18 items with photos) in a second terminal:
 ```bash
