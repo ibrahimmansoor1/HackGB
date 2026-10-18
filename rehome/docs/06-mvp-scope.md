@@ -30,7 +30,7 @@ Steps 1–4 are the demo-critical loop. Frontend builds against stub mode in par
 
 ## Stretch (only after MVP is solid)
 
-1. Post a sell draft to Nostr/Shopstr; 30-day rule with "simulate 30 days" button (already built for existing items — ibrahim)
+1. Post a sell draft to Nostr/Shopstr (`POST /api/items/{draft_id}/post`, built); 30-day rule with "simulate 30 days" button (built — ibrahim)
 2. Hardware kiosk: webcam capture + distance-sensor prompts
 3. Voice input on requester page
 4. Real handoff method (pickup / drop-off point / shipping); currently undecided

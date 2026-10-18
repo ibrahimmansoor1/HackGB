@@ -24,9 +24,9 @@ This file is the contract between frontend and backend. Change it here first.
 ## `GET /api/health`
 
 ```json
-{ "status": "ok", "stubs": true, "db": "memory" }
+{ "status": "ok", "stubs": true, "db": "memory", "marketplace": "dry_run" }
 ```
-`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`.
+`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`. `marketplace` is `"live"` when listings really go to Nostr relays (`NOSTR_NSEC` set and `MARKETPLACE_DRY_RUN=false`), else `"dry_run"`.
 
 ---
 
@@ -139,13 +139,11 @@ Hands the draft to the **concierge agent** (docs/05): it prices the item, checks
 
 ## `POST /api/items/{draft_id}/post` — list a draft for sale
 
-**Request** (optional): `{ "price": 45 }`. Without a price, the category × condition heuristic is used.
+**Request** (all optional): `{ "price": 45, "title": "...", "description": "..." }`. Without a price, the category × condition heuristic is used. `title` (≤ 80) and `description` (≤ 2000) are what the listing shows on Shopstr: send the `listing_draft` from `/sell` (edited or not). Without them the title/description are built from the item. The listing in the response (and in `GET /api/listings`) carries the posted `title` and `description`.
 
 **Response `201`:** same as `POST /api/items/{id}/list` (`{item, listing}`). The draft becomes an item and is listed (`listed`); unsold after 30 days, the expiry rule puts it in the donation pool. Doesn't count as `item_donated`.
 
-**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
-
-**Errors:** `404` unknown, expired, or already-used draft.
+**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 or title/description too long · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
 
 ---
 
@@ -273,14 +271,15 @@ Loads the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` i
 | `POST` | `/api/items/{id}/list` | Price an `items` row, post it as a Nostr classified listing (shows on Shopstr), set `listed` |
 | `POST` | `/api/admin/simulate-expiry` | Treat all active listings as 30 days old; close them on Nostr; item → `available` (donation pool) |
 | `GET` | `/api/listings?status=active` | List marketplace listings (`status` optional: `active` or `expired`; anything else is `422`) |
+| `POST` | `/api/admin/reset` | Start a rehearsal over without restarting: closes active listings (like simulate-expiry), then clears items, requests, matches, and listings; ids restart at `0001`. Events are kept. Returns `{"reset": true, "closed_listings": ["itm_0001", ...]}`; `409` while an item is being listed |
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
 
-**Open (owner: ibrahim):** how a sell draft reaches `/list` (see docs/02).
+**Sell path:** drafts are listed with `POST /api/items/{draft_id}/post` (above). `/list` below lists an existing available item.
 
 ### `POST /api/items/{id}/list`
 
-No request body.
+`{id}` is an available item (`itm_…`). Optional body: `{ "price": 45 }` (USD, > 0); without it, the category × condition default is used.
 
 **Response `200`:**
 ```json
@@ -295,6 +294,7 @@ No request body.
     "listed_at": "2026-10-18T14:05:00Z",
     "expires_at": "2026-11-17T14:05:00Z",
     "url": "https://shopstr.store/listing/naddr1...",
+    "nostr_url": "https://njump.me/naddr1...",
     "status": "active",
     "dry_run": false,
     "relays_accepted": ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]
@@ -304,7 +304,7 @@ No request body.
 - `external_id` is the Nostr event id (hex). `url` opens the listing on Shopstr (an `naddr` link, so it survives republishing). In a dry run the URL is well-formed but nothing was published; `dry_run` is `true` and `relays_accepted` is `[]`.
 - `price` comes from a per-category default × condition multiplier (whole dollars, min $1).
 
-**Errors:** `404` item not found · `409` item is not `available` (already listed, reserved, donated, or being listed) · `502` live mode and no relay accepted the event (or `NOSTR_NSEC` is invalid); the item stays `available`.
+**Errors:** `404` item not found · `409` item is not `available` (already listed, reserved, donated, or being listed) · `502` live mode and no relay accepted the event (or `NOSTR_NSEC` is invalid); the item stays `available`. The `detail` names each relay's reason (e.g. `relay.damus.io: relay not connected; nos.lol: timeout`): timeouts on every relay mean the network blocks Nostr (use a hotspot or dry run).
 
 ### `POST /api/admin/simulate-expiry`
 
@@ -314,4 +314,8 @@ No request body. Every `active` listing becomes `expired`; each item still `list
 
 ### `GET /api/listings`
 
-**Response `200`:** `{ "listings": [ Listing, ... ] }` (same shape as `listing` above)
+**Response `200`:** `{ "listings": [ Listing, ... ] }`, newest first. Each is the `listing` shape above **plus `item`** (the full Item object), so a frontend can render a card (photo, title, price) from one call.
+
+### Preview pages (HTML, not JSON)
+
+`GET /listings` (every listing as cards) and `GET /listings/{item_id}` (one item's latest listing: photo, price, status badge, links to Shopstr and njump). Served by the backend for the demo screen, so it doesn't depend on Shopstr's site. `404` if the item was never listed.

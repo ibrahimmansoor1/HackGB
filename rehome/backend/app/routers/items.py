@@ -3,7 +3,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.agents import concierge, orchestrator
 from app.core import config
 from app.schemas import (DonateIn, DonateOut, DraftOut, HandleIn, HandleOut, Item, ItemStatus,
-                         ListItemOut, PostIn, SellOut)
+                         ListIn, ListItemOut, PostIn, SellOut)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
@@ -74,7 +74,8 @@ async def handle_draft(draft_id: str, body: HandleIn | None = None):
 @router.post("/{draft_id}/post", response_model=ListItemOut, status_code=201)
 async def post_draft(draft_id: str, body: PostIn | None = None):
     try:
-        return await orchestrator.post_draft(draft_id, body.price if body else None)
+        body = body or PostIn()
+        return await orchestrator.post_draft(draft_id, body.price, body.title, body.description)
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)
 
@@ -115,8 +116,9 @@ async def list_items(status: ItemStatus | None = None):
 
 
 @router.post("/{item_id}/list", response_model=ListItemOut)
-async def list_on_marketplace(item_id: str):
+async def list_on_marketplace(item_id: str, body: ListIn | None = None):
+    """List an available item at an optional price. Drafts use /{draft_id}/post."""
     try:
-        return await orchestrator.list_item(item_id)
+        return await orchestrator.list_item(item_id, price=body.price if body else None)
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)

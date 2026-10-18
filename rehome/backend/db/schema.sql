@@ -82,10 +82,14 @@ CREATE TABLE IF NOT EXISTS listings (
   listed_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   url TEXT NOT NULL,
+  nostr_url TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
   dry_run BOOLEAN NOT NULL,
   relays_accepted TEXT[] NOT NULL DEFAULT '{}'
 );
+
+-- Databases created before nostr_url existed.
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS nostr_url TEXT NOT NULL DEFAULT '';
 
 -- Activity feed + impact stats. Hypertable on `time`; the feed polls by `id`.
 CREATE TABLE IF NOT EXISTS events (

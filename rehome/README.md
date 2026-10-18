@@ -52,13 +52,16 @@ rehome/
 │   │       ├── impact.py   ← dashboard stats
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
+│   │       ├── pages.py    ← HTML listing previews at /listings
 │   │       └── events.py
 │   ├── db/schema.sql       ← Tiger tables, hypertable, continuous aggregate
 │   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
 │   │   ├── init_db.py      ← creates the Tiger tables from db/schema.sql
+│   │   ├── db_status.py    ← read-only: is the database in DATABASE_URL ready for this code?
 │   │   ├── nostr_keygen.py ← one-time Nostr key setup
-│   │   └── make_seed_images.py ← redraws static/seed/
+│   │   ├── make_seed_images.py ← redraws static/seed/
+│   │   └── smoke_test.py   ← calls every endpoint on a running server, PASS/FAIL
 │   └── tests/
 │       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
@@ -84,6 +87,7 @@ rehome/
         │   ├── pending.js  ← hands a photo picked on the landing page to /donate
         │   ├── ActivityFeed.svelte
         │   ├── ImpactStats.svelte ← /api/impact tiles + per-category table
+        │   ├── ListingInfo.svelte ← price, live/practice/expired badge, listing links
         │   ├── components/SiteHeader.svelte
         │   └── landing/
         │       ├── ascii-home.js       ← three.js scene redrawn as ASCII (hero)
@@ -97,9 +101,10 @@ rehome/
             ├── +page.svelte        ← landing: give or get help
             └── (app)/              ← task pages share a narrow layout
                 ├── +layout.svelte
-                ├── donate/+page.svelte  ← photo/text → let Rehome handle it, or sell / donate
-                ├── request/+page.svelte ← need → matches → claim
-                └── feed/+page.svelte    ← impact dashboard + activity feed for the demo laptop
+                ├── donate/+page.svelte      ← photo/text → let Rehome handle it, or sell (quote, list on Shopstr) / donate
+                ├── request/+page.svelte     ← need → matches → claim
+                ├── marketplace/+page.svelte ← listings + "simulate 30 days"
+                └── feed/+page.svelte        ← impact dashboard + activity feed for the demo laptop
 ```
 
 ## Run it
@@ -131,7 +136,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-API docs: http://localhost:8000/docs. Run the tests from `backend/` with the venv active: `python -m pytest`.
+API docs: http://localhost:8000/docs. Run the tests from `backend/` with the venv active: `python -m pytest`. To check every endpoint on the running server, open a second terminal in `backend/` (venv active) and run `python scripts/smoke_test.py`: it prints PASS/FAIL per endpoint.
 
 **Load the demo inventory** (18 items with photos) in a second terminal:
 ```bash
@@ -148,7 +153,7 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
-The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
+The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`) from `frontend/.env` (copy `frontend/.env.example`).
 
 **Feature-check page (Streamlit, no Node needed).** Clicks through every endpoint: parse → sell / donate, request → claim, inventory, listing + 30-day expiry, impact, activity feed. With the backend running, from `backend/` with the venv active:
 ```bash
@@ -157,7 +162,13 @@ streamlit run tools/verify_app.py   # http://localhost:8501
 ```
 Set `REHOME_API` (or the sidebar field) to check another backend.
 
-**Two laptops (app + feed screen):** run the backend with `--host 0.0.0.0`, then in `.env` set `PUBLIC_BASE_URL=http://<backend laptop's IP>:8000` (so photo links work from the other laptop) and add the frontend's origin to `CORS_ORIGINS`.
+**Two laptops (app + feed screen):** laptop 1 runs everything; laptop 2 only opens a browser.
+1. Laptop 1, backend: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. In `rehome/.env` set `PUBLIC_BASE_URL=http://<laptop 1 IP>:8000` (photo links) and add `http://<laptop 1 IP>:5173` to `CORS_ORIGINS`.
+2. Laptop 1, frontend: in `frontend/.env` set `PUBLIC_API_URL=http://<laptop 1 IP>:8000`, then `npm run dev -- --host`.
+3. Laptop 2: open `http://<laptop 1 IP>:5173/feed`.
+If laptop 1's firewall asks, allow Python and Node on private networks. Find the IP with `ipconfig` (Windows) or `ipconfig getifaddr en0` (macOS).
+
+**Between rehearsals:** `POST /api/admin/reset` then `POST /api/admin/seed` (both in `/docs`). If you restart the backend instead, reload `/feed` and the landing page.
 
 ## Working together
 
@@ -169,7 +180,7 @@ Set `REHOME_API` (or the sidebar field) to check another backend.
 
 With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Each provider stubs on its own: no `GEMINI_API_KEY` → keyword parser; no `MODAL_ENDPOINT_URL` → stub requester, pricing, reasons, and embeddings. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
-The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
+The in-memory DB resets when the backend restarts. Between demo rehearsals, either restart it or call `POST /api/admin/reset` (closes any live listings first, clears the inventory, keeps the activity feed), then seed again.
 
 ## Models on Modal
 
@@ -190,12 +201,16 @@ With `DATABASE_URL` blank the backend uses the in-memory DB. To use Tiger:
 2. In `.env`, set `DATABASE_URL` to it, and `EMBED_DIM` to the embedding model's vector size (leave `384` for stub embeddings).
 3. From `backend/` with the venv active, create the tables once:
    ```bash
+   python scripts/db_status.py         # read-only check: READY, or which command to run
    python scripts/init_db.py           # safe to re-run
    python scripts/init_db.py --reset   # drop everything and start over (wipes data)
    ```
 4. Restart the backend. `GET /api/health` reports `"db": "tiger"`.
 
-Data now survives restarts; `POST /api/admin/seed` won't load the demo items twice. Use `--reset` between demo rehearsals.
+Data now survives restarts; `POST /api/admin/seed` won't load the demo items twice. Between demo rehearsals, `POST /api/admin/reset` (in `/docs`) clears the demo data and keeps the tables.
+
+- **Already have a Tiger DB from before this merge?** Run `python scripts/db_status.py`. If it says `run: init_db.py`, run that (it adds `listings.nostr_url` and keeps data). If it says `--reset`, the tables are from another schema version: `--reset` wipes them.
+- **Changed `PUBLIC_BASE_URL` or `SEED_IMAGE_BASE_URL`** (for example a new tunnel URL)? Seeded rows keep the photo links they were saved with, so call `POST /api/admin/reset`, then seed again.
 
 Postgres tests run in a throwaway `rehome_test` schema, so they're safe against the team's service:
 ```powershell
@@ -225,7 +240,18 @@ uvicorn app.main:app --reload --port 8000
 curl -X POST http://localhost:8000/api/admin/seed
 curl -X POST http://localhost:8000/api/items/itm_0001/list
 ```
-The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. Photo URLs are built from `PUBLIC_BASE_URL`. A listing only gets an `image` tag when that URL is publicly reachable (not `localhost` or a private LAN address), so for photos on Shopstr, expose the backend with a tunnel (e.g. `ngrok http 8000`) and set `PUBLIC_BASE_URL` to the tunnel URL before seeding or donating.
+The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. **Shopstr hides listings without a photo**, and it refuses photo links on `localhost` or private LAN addresses. Photo URLs are built from `PUBLIC_BASE_URL`, so for a listing to show up, the backend has to be reachable from the internet. With a free Cloudflare quick tunnel (no account needed):
+
+```powershell
+winget install --id Cloudflare.cloudflared      # once (macOS: brew install cloudflared)
+cloudflared tunnel --url http://localhost:8000  # leave running; prints https://<random>.trycloudflare.com
+```
+
+**No tunnel, seeded items only:** once the GitHub repo is public, set `SEED_IMAGE_BASE_URL=https://raw.githubusercontent.com/shuja-waraich-03/HackGB/<branch>/rehome/backend/static/seed` in `.env` (the branch must contain those photos). Seeded items then use photos hosted by GitHub. Photos donated during the demo still need the tunnel.
+
+**With a tunnel:** put the tunnel URL in `.env` as `PUBLIC_BASE_URL=https://<random>.trycloudflare.com`, restart the backend, seed, then list. Keep the backend and the tunnel running while people view the listings: Shopstr loads the photo from your laptop. Relisting an item replaces its old listing (same `d` tag). If a live listing goes out without a public photo, the activity feed says so.
+
+**See your listings:** open http://localhost:8000/listings for a storefront of everything listed (photos, prices, live/dry-run badges), or `http://localhost:8000/listings/<item_id>` for one listing with links to Shopstr and to njump.me (a plain Nostr viewer that works even when Shopstr's site is down). Your frontend can build the same cards from `GET /api/listings`, which includes each listing's item.
 
 ## AI tools and APIs used
 

@@ -8,8 +8,8 @@ from app.core import config, db, llm
 from app.integrations import ebay, marketplace, websearch
 from app.seed_data import SEED_ITEMS, summary as seed_summary
 from app.schemas import (AcceptOut, AgentEvent, CategoryImpact, DonateOut, DraftOut, ExpiryOut,
-                         Handoff, HourlyImpact, ImpactOut, Item, Listing, ListItemOut, Match, ParsedItem, PriceQuote, RequestOut,
-                         SellOut)
+                         Handoff, HourlyImpact, ImpactOut, Item, Listing, ListingWithItem,
+                         ListItemOut, Match, ParsedItem, PriceQuote, RequestOut, SellOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -223,15 +223,17 @@ async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOu
                      waiting_requests=[w["request_id"] for w in waiting])
 
 
-async def post_draft(draft_id: str, price: float | None = None) -> ListItemOut:
+async def post_draft(draft_id: str, price: float | None = None, title: str | None = None,
+                     description: str | None = None) -> ListItemOut:
     """Sell path, step 2: the draft becomes an item and is listed on the
-    marketplace at `price` (heuristic if None). Unsold after 30 days, the
-    expiry rule moves it to the donation pool."""
+    marketplace at `price` (heuristic if None) with the pricing agent's
+    title/description (template from the item if None). Unsold after 30 days,
+    the expiry rule moves it to the donation pool."""
     if price is not None and price <= 0:
         raise FlowError(422, "Price must be more than $0.")
     _, item, _ = await _draft_to_item(draft_id, None, donated=False)
     try:
-        return await list_item(item.id, price=price)
+        return await list_item(item.id, price=price, title=title, description=description)
     except FlowError as e:   # listing failed: it stays available, i.e. in the donation pool
         raise FlowError(e.status_code, f"{e.detail} {item.id} is in the donation pool.") from e
 
@@ -433,10 +435,10 @@ _seeded: list[str] = []
 async def seed_demo() -> int:
     """Load SEED_ITEMS once (pre-parsed, no model call). Calling it again is a
     no-op so a double-click doesn't duplicate the inventory."""
-    if not _seeded:
-        # Tiger keeps data across restarts; don't seed twice.
-        _seeded.extend(r["id"] for r in db.list_items()
-                       if "/static/seed/" in (r.get("image_url") or ""))
+    # Ask the DB every time: Tiger keeps data across restarts, and it can be
+    # wiped from outside this process (init_db.py --reset).
+    _seeded[:] = [r["id"] for r in db.list_items()
+                  if "/static/seed/" in (r.get("image_url") or "")]
     if _seeded:
         emit("orchestrator", f"Demo inventory already loaded ({len(_seeded)} items)")
         return 0
@@ -448,7 +450,7 @@ async def seed_demo() -> int:
         item_id = db.new_item_id()
         db.insert_item({**parsed, "id": item_id, "donor_id": "demo_donor", "note": note,
                         "zip": zip_code,
-                        "image_url": config.public_url(f"/static/seed/{photo}.png"),
+                        "image_url": config.seed_image_url(photo),
                         "status": "available", "embedding": await llm.embed(_embed_text(parsed)),
                         "created_at": db.now()})
         _seeded.append(item_id)
@@ -456,9 +458,22 @@ async def seed_demo() -> int:
     return len(_seeded)
 
 
+async def reset_demo() -> dict:
+    """Start a rehearsal from scratch without restarting the server. Active
+    listings are closed on the marketplace first, so nothing stays live for an
+    item that no longer exists. Seed again afterwards."""
+    if _listing_now:
+        raise FlowError(409, "An item is being listed right now; try again in a few seconds.")
+    closed = (await expire_listings()).expired if db.list_listings("active") else []
+    db.reset()
+    _seeded.clear()
+    emit("orchestrator", "Demo reset: inventory, requests, and listings cleared")
+    return {"reset": True, "closed_listings": closed}
+
+
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
-async def list_item(item_id: str, platform: str = "nostr",
-                    price: float | None = None) -> ListItemOut:
+async def list_item(item_id: str, platform: str = "nostr", price: float | None = None,
+                    title: str | None = None, description: str | None = None) -> ListItemOut:
     row = db.get_item(item_id)
     if row is None:
         raise FlowError(404, f"Item {item_id} not found.")
@@ -475,7 +490,7 @@ async def list_item(item_id: str, platform: str = "nostr",
             price, how = round(float(price), 2), "from the price quote"
         emit("orchestrator", f"Priced {item_id} at ${price:g} ({how})", item_id=item_id)
         try:
-            result = await channel.publish(row, price)
+            result = await channel.publish(row, price, title, description)
         except Exception as e:
             emit("orchestrator", f"Couldn't list {item_id} on {channel.label}: {e}", item_id=item_id)
             raise FlowError(502, f"Couldn't list on {channel.label}: {e}") from e
@@ -483,20 +498,31 @@ async def list_item(item_id: str, platform: str = "nostr",
         ok = len(result["relays_accepted"])
         total = ok + len(result["relays_failed"])
         if not result["dry_run"] and ok == 0:
+            why = "; ".join(f"{url.removeprefix('wss://')}: {msg}"
+                            for url, msg in result.get("relay_errors", {}).items())
             emit("orchestrator", f"Couldn't list {item_id} on {channel.label} — 0/{total} relays "
-                 "accepted; item stays available", item_id=item_id)
-            raise FlowError(502, f"No {channel.label} relay accepted the listing (0/{total}).")
+                 f"accepted; item stays available ({why or 'no reason given'})", item_id=item_id)
+            raise FlowError(502, f"No {channel.label} relay accepted the listing (0/{total}). "
+                            f"{why or 'No reason given.'} If every relay timed out, this network "
+                            "probably blocks Nostr: try a phone hotspot, or set "
+                            "MARKETPLACE_DRY_RUN=true.")
 
         listed_at = datetime.fromtimestamp(result["published_at"], timezone.utc)
         listing = {"id": db.new_listing_id(), "item_id": item_id, "platform": channel.platform,
                    "external_id": result["event_id"], "price": float(price),
                    "listed_at": listed_at, "expires_at": listed_at + timedelta(days=LISTING_DAYS),
-                   "url": result["url"], "status": "active", "dry_run": result["dry_run"],
-                   "relays_accepted": result["relays_accepted"]}
+                   "url": result["url"], "nostr_url": result["nostr_url"],
+                   "status": "active", "dry_run": result["dry_run"],
+                   "relays_accepted": result["relays_accepted"],
+                   "title": result["title"], "description": result["description"]}
         db.insert_listing(listing)
         db.update_item_status(item_id, "listed")
         how = "(dry run)" if result["dry_run"] else f"— {ok}/{total} relays"
         emit("orchestrator", f"Listed {item_id} on {channel.label} {how}", item_id=item_id)
+        if not result["dry_run"] and not marketplace.has_public_image(row):
+            emit("orchestrator", f"Heads up: {item_id} has no public photo, so {channel.label} "
+                 "hides it. Set PUBLIC_BASE_URL to a public URL (e.g. a tunnel) and relist",
+                 item_id=item_id)
         return ListItemOut(item=_public(db.get_item(item_id)),
                            listing=Listing.model_validate(listing))
     finally:
@@ -519,7 +545,8 @@ async def expire_listings() -> ExpiryOut:
     async def close(lst: dict, row: dict) -> str:
         channel = marketplace.get_channel(lst["platform"])
         try:
-            res = await channel.mark_sold(row, lst["price"], int(lst["listed_at"].timestamp()))
+            res = await channel.mark_sold(row, lst["price"], int(lst["listed_at"].timestamp()),
+                                          lst.get("title"), lst.get("description"))
             if res["dry_run"] or res["relays_accepted"]:
                 return ""
         except Exception:
@@ -536,5 +563,22 @@ async def expire_listings() -> ExpiryOut:
     return ExpiryOut(expired=expired)
 
 
-def listings(status: str | None = None) -> list[Listing]:
-    return [Listing.model_validate(r) for r in db.list_listings(status)]
+def marketplace_mode() -> str:
+    """'live' when listings really go to Nostr relays, else 'dry_run'."""
+    return "live" if marketplace.is_live() else "dry_run"
+
+
+def listings(status: str | None = None) -> list[ListingWithItem]:
+    """Newest first, each with its item so a frontend can render a card."""
+    out = []
+    for r in sorted(db.list_listings(status), key=lambda r: r["listed_at"], reverse=True):
+        row = db.get_item(r["item_id"])
+        if row is not None:
+            out.append(ListingWithItem.model_validate({**r, "item": _public(row)}))
+    return out
+
+
+def listing_for_item(item_id: str) -> ListingWithItem | None:
+    """The item's most recent listing (for the preview page)."""
+    found = [lst for lst in listings() if lst.item_id == item_id]
+    return found[0] if found else None

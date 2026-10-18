@@ -1,7 +1,8 @@
 // The ONLY file that talks to the backend. Contract: docs/04-api-contract.md
 import { env } from '$env/dynamic/public';
 
-export const BASE = env.PUBLIC_API_URL || 'http://localhost:8000';
+// Trailing slash removed so `${BASE}/api/...` never becomes `//api`.
+export const BASE = (env.PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 async function handle(res) {
   const body = await res.json().catch(() => ({}));
@@ -32,6 +33,19 @@ export async function handleDraft(draftId, preference = 'auto') {
 /** S1: price a draft. Returns { suggested_price, comps, listing_draft, basis }. */
 export async function sellDraft(draftId) {
   return handle(await fetch(`${BASE}/api/items/${draftId}/sell`, { method: 'POST' }));
+}
+
+/** S6: list a draft for sale on Shopstr at `price` (category default if omitted),
+ *  posting `title`/`description` (the /sell quote's listing_draft; template if omitted).
+ *  Returns { item, listing }. */
+export async function postDraft(draftId, price, { title, description } = {}) {
+  const body = {};
+  if (price) body.price = price;
+  if (title?.trim()) body.title = title.trim();
+  if (description?.trim()) body.description = description.trim();
+  const init = { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) };
+  return handle(await fetch(`${BASE}/api/items/${encodeURIComponent(draftId)}/post`, init));
 }
 
 /** N1: donate a draft. Returns { item_id, status, message }. */
@@ -79,4 +93,26 @@ export async function getImpact() {
 
 export async function listItems(status = 'available') {
   return handle(await fetch(`${BASE}/api/items?status=${status}`));
+}
+
+/** Marketplace: list an available item (itm_…) or a sell draft (drf_…) on Nostr
+ *  (shows on Shopstr), at `price` if given. Returns { item, listing }.
+ *  Errors: 404 unknown/used draft, 409 item not available, 502 no relay accepted it. */
+export async function listItem(itemId, price) {
+  const init = { method: 'POST' };
+  if (price) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify({ price });
+  }
+  return handle(await fetch(`${BASE}/api/items/${encodeURIComponent(itemId)}/list`, init));
+}
+
+/** Marketplace listings, newest first, each with its item. status: '' | 'active' | 'expired'. */
+export async function getListings(status = '') {
+  return handle(await fetch(`${BASE}/api/listings${status ? `?status=${status}` : ''}`));
+}
+
+/** Demo: treat active listings as 30 days old; unsold items go back to the donation pool. */
+export async function simulateExpiry() {
+  return handle(await fetch(`${BASE}/api/admin/simulate-expiry`, { method: 'POST' }));
 }

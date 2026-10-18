@@ -1,0 +1,8 @@
+# Secrets: the app reads rehome/.env, but VS Code (python.terminal.useEnvFile)
+# reads a .env at the repo root. Never commit either.
+.env
+*.env
+!.env.example
+
+# OS / editor clutter
+.DS_Store
