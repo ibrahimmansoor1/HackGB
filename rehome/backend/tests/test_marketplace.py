@@ -224,3 +224,28 @@ def test_invalid_nsec_is_a_502(monkeypatch):
     item_id = _new_item()
     assert client.post(f"/api/items/{item_id}/list").status_code == 502
     assert client.get("/api/items?status=available").json()["items"][-1]["id"] == item_id
+
+
+def test_request_never_reserves_an_item_mid_listing(monkeypatch):
+    """Slow relays: a request arriving while the item is being listed must not
+    reserve it (otherwise it ends up both reserved and for sale)."""
+    from app.agents import orchestrator
+
+    class SlowClient(FakeClient):
+        async def send_event(self, ev, ok_timeout=None):
+            await asyncio.sleep(0.2)
+            return await super().send_event(ev, ok_timeout)
+
+    _go_live(monkeypatch, SlowClient(accept=RELAYS))
+    item_id = _new_item()
+
+    async def race():
+        listing = asyncio.create_task(orchestrator.list_item(item_id))
+        await asyncio.sleep(0.05)
+        req = await orchestrator.handle_request("black puffer jacket insulated hooded",
+                                                "02115", "demo_requester")
+        return await listing, req
+
+    out, req = asyncio.run(race())
+    assert out.item.status == "listed"
+    assert item_id not in [m.item_id for m in req.matches]

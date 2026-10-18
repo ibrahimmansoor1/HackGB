@@ -16,6 +16,7 @@ fits this request, or what it lacks. Return ONLY a JSON array of
 # Stub embeddings score much lower than real ones.
 THRESHOLD = 0.15 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
+_listing_now: set[str] = set()   # items being published; guards double-clicks and matching
 
 
 class FlowError(Exception):
@@ -63,7 +64,9 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     emit("requester", f"Inferred {ctx}; needs {need}", request_id=req_id)
 
     qvec = await llm.embed(query.search_text)
-    candidates = db.vector_search(qvec, top_k=config.TOP_K)
+    # Items mid-listing are still `available` in the DB; never reserve one.
+    candidates = [(r, s) for r, s in db.vector_search(qvec, top_k=config.TOP_K + len(_listing_now))
+                  if r["id"] not in _listing_now][:config.TOP_K]
     emit("orchestrator", f"Found {len(candidates)} candidates", request_id=req_id)
 
     # threshold + must_have boost
@@ -114,9 +117,6 @@ async def _reasons(query, rows: list[dict]) -> dict[str, str]:
 
 
 # ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
-_listing_now: set[str] = set()   # guards double-clicks while relays are slow
-
-
 async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
     row = db.get_item(item_id)
     if row is None:
