@@ -2,7 +2,7 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.agents import orchestrator
 from app.core import config, db
-from app.schemas import Item
+from app.schemas import Item, ListItemOut
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
@@ -30,3 +30,11 @@ async def donate_item(zip: str = Form(...), note: str | None = Form(None),
 @router.get("")
 async def list_items(status: str | None = None):
     return {"items": [orchestrator._public(r) for r in db.list_items(status)]}
+
+
+@router.post("/{item_id}/list", response_model=ListItemOut)
+async def list_on_marketplace(item_id: str):
+    try:
+        return await orchestrator.list_item(item_id)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)

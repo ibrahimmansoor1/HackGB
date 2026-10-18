@@ -65,6 +65,30 @@ class RequestOut(BaseModel):
     matches: list[Match]
 
 
+class Listing(BaseModel):
+    """Marketplace listing (docs/03 listings). platform `nostr` shows on Shopstr."""
+    id: str
+    item_id: str
+    platform: Literal["nostr"]
+    external_id: str          # Nostr event id (hex)
+    price: float
+    listed_at: datetime
+    expires_at: datetime
+    url: str
+    status: Literal["active", "expired"]
+    dry_run: bool
+    relays_accepted: list[str] = Field(default_factory=list)
+
+
+class ListItemOut(BaseModel):
+    item: Item
+    listing: Listing
+
+
+class ExpiryOut(BaseModel):
+    expired: list[str]
+
+
 class AgentEvent(BaseModel):
     id: int
     agent: Literal["orchestrator", "parser", "requester"]

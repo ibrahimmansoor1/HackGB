@@ -1,9 +1,13 @@
 """Orchestrator: the ONLY module that reads/writes the database.
 Flows and ranking rules are specified in docs/02 and docs/05."""
+import asyncio
+from datetime import datetime, timedelta, timezone
 from app.agents import parser, requester
 from app.agents.events import emit
 from app.core import config, db, llm
-from app.schemas import Item, Match, ParsedItem, RequestOut
+from app.integrations import marketplace
+from app.schemas import (ExpiryOut, Item, Listing, ListItemOut, Match, ParsedItem,
+                         RequestOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -11,6 +15,15 @@ fits this request, or what it lacks. Return ONLY a JSON array of
 
 # Stub embeddings score much lower than real ones.
 THRESHOLD = 0.15 if config.USE_STUBS else config.MATCH_THRESHOLD
+LISTING_DAYS = 30
+
+
+class FlowError(Exception):
+    """A flow can't proceed; routers turn this into an HTTP error."""
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
 
 
 def _public(row: dict) -> Item:
@@ -98,3 +111,86 @@ async def _reasons(query, rows: list[dict]) -> dict[str, str]:
         return {o["item_id"]: o["reason"] for o in out}
     except Exception:
         return {}
+
+
+# ---- marketplace (stretch): list -> 30 days unsold -> donation pool --------
+_listing_now: set[str] = set()   # guards double-clicks while relays are slow
+
+
+async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
+    row = db.get_item(item_id)
+    if row is None:
+        raise FlowError(404, f"Item {item_id} not found.")
+    if row["status"] != "available" or item_id in _listing_now:
+        status = "being listed" if item_id in _listing_now else row["status"]
+        raise FlowError(409, f"Item {item_id} is {status}; only available items can be listed.")
+    channel = marketplace.get_channel(platform)
+    _listing_now.add(item_id)
+    try:
+        price = marketplace.suggest_price(row)
+        emit("orchestrator", f"Priced {item_id} at ${price} ({row['category']}, {row['condition']})",
+             item_id=item_id)
+        try:
+            result = await channel.publish(row, price)
+        except Exception as e:
+            emit("orchestrator", f"Couldn't list {item_id} on {channel.label}: {e}", item_id=item_id)
+            raise FlowError(502, f"Couldn't list on {channel.label}: {e}") from e
+
+        ok = len(result["relays_accepted"])
+        total = ok + len(result["relays_failed"])
+        if not result["dry_run"] and ok == 0:
+            emit("orchestrator", f"Couldn't list {item_id} on {channel.label} — 0/{total} relays "
+                 "accepted; item stays available", item_id=item_id)
+            raise FlowError(502, f"No {channel.label} relay accepted the listing (0/{total}).")
+
+        listed_at = datetime.fromtimestamp(result["published_at"], timezone.utc)
+        listing = {"id": db.new_listing_id(), "item_id": item_id, "platform": channel.platform,
+                   "external_id": result["event_id"], "price": float(price),
+                   "listed_at": listed_at, "expires_at": listed_at + timedelta(days=LISTING_DAYS),
+                   "url": result["url"], "status": "active", "dry_run": result["dry_run"],
+                   "relays_accepted": result["relays_accepted"]}
+        db.insert_listing(listing)
+        db.update_item_status(item_id, "listed")
+        how = "(dry run)" if result["dry_run"] else f"— {ok}/{total} relays"
+        emit("orchestrator", f"Listed {item_id} on {channel.label} {how}", item_id=item_id)
+        return ListItemOut(item=_public(db.get_item(item_id)),
+                           listing=Listing.model_validate(listing))
+    finally:
+        _listing_now.discard(item_id)
+
+
+async def expire_listings() -> ExpiryOut:
+    """Demo fast-forward: treat every active listing as 30 days old. Close it on
+    the marketplace and return the item to the donation pool (available)."""
+    due = []
+    for lst in db.list_listings("active"):
+        db.update_listing(lst["id"], status="expired")
+        row = db.get_item(lst["item_id"])
+        if row is not None and row["status"] == "listed":
+            due.append((lst, row))
+    if not due:
+        emit("orchestrator", "No active listings to expire")
+        return ExpiryOut(expired=[])
+
+    async def close(lst: dict, row: dict) -> str:
+        channel = marketplace.get_channel(lst["platform"])
+        try:
+            res = await channel.mark_sold(row, lst["price"], int(lst["listed_at"].timestamp()))
+            if res["dry_run"] or res["relays_accepted"]:
+                return ""
+        except Exception:
+            pass
+        return f" (couldn't close the {channel.label} listing; it may still show)"
+
+    notes = await asyncio.gather(*(close(lst, row) for lst, row in due))
+    expired = []
+    for (lst, row), note in zip(due, notes):
+        db.update_item_status(row["id"], "available")
+        expired.append(row["id"])
+        emit("orchestrator", f"30 days unsold — {row['id']} moved to donation pool{note}",
+             item_id=row["id"])
+    return ExpiryOut(expired=expired)
+
+
+def listings(status: str | None = None) -> list[Listing]:
+    return [Listing.model_validate(r) for r in db.list_listings(status)]

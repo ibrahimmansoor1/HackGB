@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 from app.agents import orchestrator
 from app.core import db
-from app.schemas import ParsedItem
+from app.schemas import ExpiryOut, ParsedItem
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -34,3 +34,9 @@ async def seed():
                                     + (f", size {size}" if size else "") + f", {cond}.")
         await orchestrator.store(parsed, None, "02115", "demo_donor", None, db.new_item_id())
     return {"seeded": len(SEED)}
+
+
+@router.post("/simulate-expiry", response_model=ExpiryOut)
+async def simulate_expiry():
+    """Fast-forward 30 days: unsold listings go back to the donation pool."""
+    return await orchestrator.expire_listings()

@@ -11,9 +11,11 @@ _items: dict[str, dict] = {}
 _requests: dict[str, dict] = {}
 _matches: list[dict] = []
 _events: list[dict] = []
+_listings: dict[str, dict] = {}
 _item_ids = itertools.count(1)
 _req_ids = itertools.count(1)
 _event_ids = itertools.count(1)
+_listing_ids = itertools.count(1)
 
 
 def now() -> datetime:
@@ -68,6 +70,24 @@ def insert_request(row: dict) -> dict:
 
 def insert_matches(rows: list[dict]) -> None:
     _matches.extend(rows)
+
+
+# ---- listings (marketplace) ------------------------------------------------
+def new_listing_id() -> str:
+    return f"lst_{next(_listing_ids):04d}"
+
+
+def insert_listing(row: dict) -> dict:
+    _listings[row["id"]] = row
+    return row
+
+
+def list_listings(status: str | None = None) -> list[dict]:
+    return [r for r in _listings.values() if status is None or r["status"] == status]
+
+
+def update_listing(listing_id: str, **fields) -> None:
+    _listings[listing_id].update(fields)
 
 
 # ---- events ----------------------------------------------------------------
