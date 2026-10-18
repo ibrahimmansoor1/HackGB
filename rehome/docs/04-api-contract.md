@@ -86,7 +86,7 @@ No request body.
   "basis": "active listings"
 }
 ```
-`basis` is `"active listings"` when comps came from the eBay Browse API (UI labels prices "currently listed for"), or `"estimate"` when eBay was unavailable and the category × condition heuristic was used (`comps: []`).
+`basis` is `"active listings"` when comps came from the eBay Browse API (UI labels prices "currently listed for"); `"web search"` when there were no eBay comps and the pricing agent read going rates from Brave Search results (`BRAVE_API_KEY`; comps are those results, `source` = the site, e.g. `poshmark.com`; UI: "listed online for"); or `"estimate"` when neither worked and the category × condition heuristic was used (`comps: []`).
 
 **Errors:** `404` unknown or expired draft · `502` pricing model failed.
 

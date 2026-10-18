@@ -118,7 +118,9 @@ Return ONLY JSON with keys: suggested_price {low, high, currency}, comps,
 listing_draft {title, description}. No prose, no markdown fences.
 ```
 
-**Fallback:** no eBay access, eBay error, or no usable comps → orchestrator uses `marketplace.suggest_price` (category default × condition) as the midpoint, ±20 %, `comps: []`, template listing draft, `basis: "estimate"`.
+**Web search:** no eBay comps and `BRAVE_API_KEY` set → the orchestrator searches Brave for `used <brand> <item> price`, and the pricing agent reads the results (title, url, snippet): keeps those with a price for the same kind of item, returns them as comps (only URLs it was given), and prices below typical asking prices. `basis: "web search"`. Offline, the stub takes the first `$` amount in each comparable result.
+
+**Fallback:** no eBay access, eBay error, or no usable comps (and no usable web results) → orchestrator uses `marketplace.suggest_price` (category default × condition) as the midpoint, ±20 %, `comps: []`, template listing draft, `basis: "estimate"`.
 
 ---
 

@@ -263,6 +263,7 @@ Disclosed per HackGB rules.
 | [LangGraph](https://langchain-ai.github.io/langgraph/) + [langchain-openai](https://pypi.org/project/langchain-openai/) | The concierge agent's loop: a Modal tool-calling model chooses which specialist agent (pricing, matchmaker, Shopstr listing, donation) to call, then acts for the donor |
 | [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
 | [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [Brave Search API](https://brave.com/search/api/) | Web results the pricing agent reads for current going rates (eBay, Poshmark, Mercari…) when eBay comps aren't available (`BRAVE_API_KEY`) |
 | [eBay Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) | Active listings as pricing comps for the Sell path (`EBAY_APP_ID`, `EBAY_CERT_ID`); prices shown as "currently listed for". Without keys, Sell uses a category × condition estimate. |
 | [nostr-sdk](https://pypi.org/project/nostr-sdk/) (rust-nostr Python bindings) | Builds and signs NIP-99 classified listings (kind 30402) and sends them to relays |
 | [Nostr](https://nostr.com) relays + [Shopstr](https://shopstr.store) | Public marketplace where listed items appear; NIP-99 is an open standard, so no API key or developer approval is needed |

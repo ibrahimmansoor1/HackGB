@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from app.agents import parser, pricing, requester, stub_rules
 from app.agents.events import emit
 from app.core import config, db, llm
-from app.integrations import ebay, marketplace
+from app.integrations import ebay, marketplace, websearch
 from app.seed_data import SEED_ITEMS, summary as seed_summary
 from app.schemas import (AcceptOut, AgentEvent, CategoryImpact, DonateOut, DraftOut, ExpiryOut,
                          Handoff, HourlyImpact, ImpactOut, Item, Listing, ListingWithItem,
@@ -147,11 +147,14 @@ async def sell_draft(draft_id: str) -> SellOut:
         urls = {c["url"] for c in found}
         quote.comps = [c for c in quote.comps if c.url in urls]   # only real listings
         basis = "active listings" if quote.comps else "estimate"
+    if basis == "estimate" and websearch.configured():
+        quote, basis = await _web_quote(item) or (quote, basis)
     if basis == "estimate":
         quote = _estimate(item)
 
     p = quote.suggested_price
-    label = "currently listed for" if basis == "active listings" else "estimate"
+    label = {"active listings": "currently listed for", "web search": "listed online for",
+             "estimate": "estimate"}[basis]
     emit("pricing", f"Suggested ${p.low:g}–{p.high:g} ({label})",
          event_type="price_quoted", category=item["category"])
     return SellOut(draft_id=draft_id, basis=basis, **quote.model_dump())
@@ -159,6 +162,31 @@ async def sell_draft(draft_id: str) -> SellOut:
 
 def _comps_query(item: dict) -> str:
     return " ".join(w for w in (item.get("brand"), item["item"]) if w)
+
+
+async def _web_quote(item: dict) -> tuple[PriceQuote, str] | None:
+    """Brave web search -> pricing agent reads the going rates. None when the
+    search or the agent comes up empty (caller uses the estimate)."""
+    query = f"used {_comps_query(item)} price"
+    try:
+        results = await websearch.search(query)
+    except websearch.SearchError as e:
+        emit("orchestrator", f"Couldn't search the web ({e}); using an estimate")
+        return None
+    emit("orchestrator", f"Searched the web for “{query}”: {len(results)} results")
+    if not results:
+        return None
+    try:
+        quote = await pricing.from_search(item, results)
+    except Exception as e:
+        emit("pricing", f"Couldn't read prices from the search results ({type(e).__name__})")
+        return None
+    if not quote.comps:
+        emit("pricing", "No comparable prices in the search results; using an estimate")
+        return None
+    sites = ", ".join(dict.fromkeys(c.source for c in quote.comps))
+    emit("pricing", f"Read {len(quote.comps)} going rates online ({sites})")
+    return quote, "web search"
 
 
 def _estimate(item: dict) -> PriceQuote:

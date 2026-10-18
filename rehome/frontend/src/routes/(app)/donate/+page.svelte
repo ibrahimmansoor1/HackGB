@@ -117,7 +117,8 @@
     {/if}
     {#if quote}
       {@const p = quote.suggested_price}
-      <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for' : 'Estimated value'}:
+      <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for'
+        : quote.basis === 'web search' ? 'Similar items are listed online for' : 'Estimated value'}:
         ${p.low}–${p.high}</h3>
       {#if quote.comps.length}
         <ul>
