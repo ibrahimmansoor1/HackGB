@@ -23,6 +23,11 @@ class ParsedItem(BaseModel):
     attributes: list[str] = Field(default_factory=list)
     summary: str
 
+    @field_validator("color", mode="before")
+    @classmethod
+    def _color_default(cls, v):
+        return v or "assorted"     # models return null when neither photo nor text says
+
 
 class StructuredQuery(BaseModel):
     """Requester agent output (R3)."""

@@ -142,6 +142,7 @@ def test_real_model_client_binds_the_four_tools(monkeypatch):
     draft_id = client.post("/api/items/parse", data={"zip": "1", "text": JACKET}).json()["draft_id"]
     bound = concierge._model(concierge._tools(concierge._Run(draft_id, "auto")))
     names = [t["function"]["name"] for t in bound.kwargs["tools"]]
+    assert bound.kwargs["tool_choice"] == "required"
     assert names == ["get_price_quote", "check_local_demand", "list_for_sale", "donate_item"]
     price = bound.kwargs["tools"][2]["function"]["parameters"]["properties"]["price"]
     assert price["type"] == "number"
@@ -155,7 +156,7 @@ def test_model_drives_the_tools(model):
                   AIMessage("Listed your jacket for $21 on Shopstr.")])
     out = _handle().json()
     assert out["brain"] == "modal" and out["action"] == "listed"
-    assert out["listing"]["price"] == 21 and out["summary"] == "Listed your jacket for $21 on Shopstr."
+    assert out["listing"]["price"] == 21 and "listed it on Shopstr for $21" in out["summary"]
     assert out["steps"] == ["get_price_quote", "check_local_demand", "list_for_sale"]
     tool_results = [m for m in fake.seen[1] if m.type == "tool"]
     assert {m.name for m in tool_results} == {"get_price_quote", "check_local_demand"}

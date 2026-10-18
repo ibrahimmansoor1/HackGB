@@ -64,7 +64,8 @@ def _model(tools):
     return ChatOpenAI(model=config.MODAL_AGENT_MODEL, base_url=config.MODAL_ENDPOINT_URL,
                       api_key=config.MODAL_API_KEY or "not-needed", temperature=0.2,
                       timeout=180, max_retries=1, max_tokens=4096,
-                      extra_body=llm.modal_extra_body() or None).bind_tools(tools)
+                      extra_body=llm.modal_extra_body() or None
+                      ).bind_tools(tools, tool_choice="required")   # act, don't chat
 
 
 # ---- tools (each one is a specialist agent behind the orchestrator) ----------
@@ -207,6 +208,8 @@ def _graph(run: _Run):
     tools = _tools(run)
 
     async def concierge(state: MessagesState):
+        if run.action:   # done: the summary comes from what the tools did (no extra model call)
+            return {"messages": [AIMessage(_summary(run))]}
         if run.brain == "modal":
             try:
                 return {"messages": [await _model(tools).ainvoke(state["messages"])]}

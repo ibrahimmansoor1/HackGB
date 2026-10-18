@@ -18,6 +18,7 @@ color, size, condition, season, attributes, summary.
   about, chosen from this vocabulary when possible: {", ".join(stub_rules.ATTRIBUTE_VOCAB)}.
 - condition: one of new, like new, good, fair. Judge from the photo; prefer
   the donor's text if it says.
+- color: the main color; "assorted" if you can't tell.
 - season: winter, summer, all, or null.
 - summary: one sentence a buyer would read.
 No prose, no markdown fences."""
