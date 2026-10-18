@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+/* Design tokens. Light is the default and dark follows the OS setting.
+   The hero's "night window" uses the fixed night-* colors in both themes. */
+:root {
+  --ground: #f3ede5;
+  --surface: #fcf9f4;
+  --ink: #2a2130;
+  --ink-soft: #685b6b;
+  --line: #e1d6c9;
+  --lamp: #f2a93b;
+  --lamp-ink: #965a0c;
+  --sage: #557452;
+  --on-sage: #ffffff;
+  --kraft: #dcc29a;
+  --brick: #b4553a;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #141017;
+    --surface: #1f1824;
+    --ink: #f3e9dc;
+    --ink-soft: #b4a7b1;
+    --line: #362c3c;
+    --lamp: #f4ae47;
+    --lamp-ink: #f6bd66;
+    --sage: #a2c19b;
+    --on-sage: #141017;
+    --kraft: #cfb187;
+    --brick: #e0805f;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-lamp: var(--lamp);
+  --color-lamp-ink: var(--lamp-ink);
+  --color-sage: var(--sage);
+  --color-on-sage: var(--on-sage);
+  --color-kraft: var(--kraft);
+  --color-brick: var(--brick);
+}
+
+@theme {
+  --color-night: #1d1522;
+  --color-night-ink: #f6e8d4;
+  --color-night-soft: #c5b2bf;
+
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--ground);
+    color: var(--ink);
+  }
+  body {
+    @apply font-sans antialiased;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--lamp-ink);
+    outline-offset: 3px;
+  }
+}
