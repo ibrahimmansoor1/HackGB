@@ -420,3 +420,12 @@ def test_reset_clears_inventory_and_reseeds_from_0001():
 
 def test_reset_with_nothing_listed():
     assert client.post("/api/admin/reset").json() == {"reset": True, "closed_listings": []}
+
+
+def test_seed_works_again_after_db_is_wiped_elsewhere():
+    """init_db.py --reset empties Tiger without telling the running server;
+    seeding must notice the rows are gone instead of trusting a cache."""
+    from app.core import db
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}
+    db.reset()                                  # wiped outside the API
+    assert client.post("/api/admin/seed").json() == {"seeded": 18}

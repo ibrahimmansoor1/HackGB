@@ -167,7 +167,10 @@ With `DATABASE_URL` blank the backend uses the in-memory DB. To use Tiger:
    ```
 4. Restart the backend. `GET /api/health` reports `"db": "tiger"`.
 
-Data now survives restarts; `POST /api/admin/seed` won't load the demo items twice. Use `--reset` between demo rehearsals.
+Data now survives restarts; `POST /api/admin/seed` won't load the demo items twice. Between demo rehearsals, `POST /api/admin/reset` (in `/docs`) clears the demo data and keeps the tables.
+
+- **Already have a Tiger DB from before this merge?** Run `python scripts/db_status.py`. If it says `run: init_db.py`, run that (it adds `listings.nostr_url` and keeps data). If it says `--reset`, the tables are from another schema version: `--reset` wipes them.
+- **Changed `PUBLIC_BASE_URL` or `SEED_IMAGE_BASE_URL`** (for example a new tunnel URL)? Seeded rows keep the photo links they were saved with, so call `POST /api/admin/reset`, then seed again.
 
 Postgres tests run in a throwaway `rehome_test` schema, so they're safe against the team's service:
 ```powershell

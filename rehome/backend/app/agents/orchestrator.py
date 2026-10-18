@@ -171,10 +171,10 @@ _seeded: list[str] = []
 async def seed_demo() -> int:
     """Load SEED_ITEMS once (pre-parsed, no model call). Calling it again is a
     no-op so a double-click doesn't duplicate the inventory."""
-    if not _seeded:
-        # Tiger keeps data across restarts; don't seed twice.
-        _seeded.extend(r["id"] for r in db.list_items()
-                       if "/static/seed/" in (r.get("image_url") or ""))
+    # Ask the DB every time: Tiger keeps data across restarts, and it can be
+    # wiped from outside this process (init_db.py --reset).
+    _seeded[:] = [r["id"] for r in db.list_items()
+                  if "/static/seed/" in (r.get("image_url") or "")]
     if _seeded:
         emit("orchestrator", f"Demo inventory already loaded ({len(_seeded)} items)")
         return 0
