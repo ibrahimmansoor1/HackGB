@@ -56,6 +56,9 @@ ATTRIBUTES = {
     "non-stick": ["non-stick", "nonstick"],
     "machine-washable": ["machine washable", "machine-washable"],
 }
+# Shared attribute vocabulary (docs/05): the parser and requester prompts both
+# list these so item attributes and must_have line up in vector space.
+ATTRIBUTE_VOCAB = list(ATTRIBUTES)
 STOP = {"a", "an", "the", "my", "our", "this", "that", "some", "old", "new", "nice", "great",
         "used", "barely", "worn", "gently", "clean", "cute", "big", "small", "little",
         "pair", "of", "and", "or", "warm", "good", "need", "want", "looking", "for"}

@@ -32,6 +32,12 @@ def _public(row: dict) -> Item:
     return Item.model_validate({k: v for k, v in row.items() if k != "embedding"})
 
 
+def _label(p: ParsedItem) -> str:
+    """'black Columbia puffer jacket, size M' for feed messages."""
+    name = " ".join(w for w in (p.color, p.brand, p.item) if w)
+    return name + (f", size {p.size}" if p.size else "")
+
+
 def _embed_text(p: dict) -> str:
     return " ".join([p["summary"], *p["attributes"], p["item"], p["category"],
                      p.get("season") or ""]).strip()
@@ -60,9 +66,8 @@ async def donate(note: str | None, zip_code: str, donor_id: str,
                  image_bytes: bytes | None, image_mime: str,
                  image_url: str | None, item_id: str) -> Item:
     emit("orchestrator", "New donation received", item_id=item_id)
-    parsed = await parser.parse_item(note, image_bytes, image_mime)
-    emit("parser", f"Identified {parsed.color} {parsed.item}"
-         + (f", size {parsed.size}" if parsed.size else ""), item_id=item_id,
+    parsed = await parser.parse_item(note, [(image_bytes, image_mime)] if image_bytes else [])
+    emit("parser", f"Identified {_label(parsed)}", item_id=item_id,
          event_type="item_parsed", category=parsed.category)
     return await store(parsed, note, zip_code, donor_id, image_url, item_id)
 

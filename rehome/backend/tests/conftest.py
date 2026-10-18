@@ -1,9 +1,11 @@
 """Every test starts with an empty in-memory DB (ids keep counting up).
-Tests never touch Tiger, even if .env sets DATABASE_URL; test_tiger.py
+Tests never touch Tiger or Gemini, even if .env configures them; test_tiger.py
 covers the Postgres backend against TEST_DATABASE_URL."""
 import os
 
-os.environ["DATABASE_URL"] = ""   # before app imports; load_dotenv won't override it
+# Before app imports; load_dotenv won't override variables that are already set.
+os.environ["DATABASE_URL"] = ""
+os.environ["GEMINI_API_KEY"] = ""
 
 import pytest  # noqa: E402
 

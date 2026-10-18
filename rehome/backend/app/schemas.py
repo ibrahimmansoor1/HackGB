@@ -15,6 +15,7 @@ class ParsedItem(BaseModel):
     """Parser agent output (D3)."""
     category: Category
     item: str
+    brand: Optional[str] = None     # from a visible tag or the donor's text; never guessed
     color: str
     size: Optional[str] = None
     condition: Condition

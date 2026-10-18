@@ -5,11 +5,10 @@ from app.agents import stub_rules
 from app.core import config, llm
 from app.schemas import StructuredQuery
 
-SYSTEM_PROMPT = """You turn a person's request for a donated item into a search query.
+SYSTEM_PROMPT = f"""You turn a person's request for a donated item into a search query.
 Infer practical context the person did not say: climate from the location
 and month, activity, age group. Translate that context into concrete item
-attributes, using the same vocabulary as a catalog (insulated, waterproof,
-hooded, padded, breathable...).
+attributes from this vocabulary: {", ".join(stub_rules.ATTRIBUTE_VOCAB)}.
 Return ONLY a JSON object with exactly these keys: need, inferred_context,
 must_have, nice_to_have, size, search_text.
 - must_have: attributes without which the item would not serve the need.

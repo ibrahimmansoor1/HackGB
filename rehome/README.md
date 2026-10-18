@@ -31,7 +31,7 @@ rehome/
 │   │   │   ├── config.py   ← env settings
 │   │   │   ├── db.py       ← database access (in-memory stub; Tiger when DATABASE_URL is set)
 │   │   │   ├── db_pg.py    ← Tiger Data (Postgres + pgvector) version of db.py
-│   │   │   └── llm.py      ← model client (Modal), embeddings
+│   │   │   └── llm.py      ← model clients (Gemini parser, Modal text + embeddings)
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
 │   │   │   ├── orchestrator.py
@@ -134,7 +134,7 @@ The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ## Before the model is wired up
 
-With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
+With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Each provider stubs on its own: no `GEMINI_API_KEY` → keyword parser; no `MODAL_ENDPOINT_URL` → stub requester, pricing, reasons, and embeddings. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
 The in-memory DB resets when the backend restarts. Restart it between demo rehearsals, then seed again.
 
@@ -190,7 +190,7 @@ Disclosed per HackGB rules.
 | Tool / API | What we used it for |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
-| [Modal](https://modal.com) | Hosts the vision + text model and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
+| [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
 | [nostr-sdk](https://pypi.org/project/nostr-sdk/) (rust-nostr Python bindings) | Builds and signs NIP-99 classified listings (kind 30402) and sends them to relays |
 | [Nostr](https://nostr.com) relays + [Shopstr](https://shopstr.store) | Public marketplace where listed items appear; NIP-99 is an open standard, so no API key or developer approval is needed |
-| Google Gemini *(optional)* | Alternative model provider if credits arrive (`GEMINI_API_KEY`) |
