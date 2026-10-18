@@ -1,9 +1,9 @@
 """Donor endpoints. Contract: docs/04-api-contract.md"""
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from app.agents import orchestrator
+from app.agents import concierge, orchestrator
 from app.core import config
-from app.schemas import (DonateIn, DonateOut, DraftOut, Item, ItemStatus, ListItemOut, PostIn,
-                         SellOut)
+from app.schemas import (DonateIn, DonateOut, DraftOut, HandleIn, HandleOut, Item, ItemStatus,
+                         ListItemOut, PostIn, SellOut)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
@@ -57,6 +57,16 @@ async def parse_item(zip: str = Form(...), text: str | None = Form(None),
 async def sell_draft(draft_id: str):
     try:
         return await orchestrator.sell_draft(draft_id)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
+@router.post("/{draft_id}/handle", response_model=HandleOut)
+async def handle_draft(draft_id: str, body: HandleIn | None = None):
+    """Hand the draft to the concierge agent: it prices it, checks local demand,
+    then lists or donates it, and says what it did."""
+    try:
+        return await concierge.handle(draft_id, body.preference if body else "auto")
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)
 

@@ -208,18 +208,31 @@ async def post_draft(draft_id: str, price: float | None = None) -> ListItemOut:
         raise FlowError(e.status_code, f"{e.detail} {item.id} is in the donation pool.") from e
 
 
-async def matchmake(item: dict, vec: list[float]) -> list[dict]:
-    """Matchmaker agent: open requests this new item could fill, best first.
-    Each one gets the item as a suggested match it can claim with /accept."""
+def draft_item(draft_id: str) -> dict:
+    """The parsed item of a live draft (404 FlowError otherwise)."""
+    return _get_draft(draft_id)["item"]
+
+
+async def local_demand(item: dict, vec: list[float] | None = None) -> list[dict]:
+    """Read-only matchmaker check: open requests this item could fill, best first."""
+    if vec is None:
+        vec = await llm.embed(_embed_text(item))
     threshold = _threshold()
     waiting = []
     for req, score in db.open_requests_near(vec, top_k=5):
         final = score
         if config.USE_STUBS:     # same stub re-ranking as handle_request
             final += stub_rules.stub_fit(req, item)
-        if final >= threshold and db.get_match(req["id"], item["id"]) is None:
+        if final >= threshold:
             waiting.append({"request_id": req["id"], "zip": req["zip"], "score": round(score, 3),
                             "needs": req.get("needs") or []})
+    return waiting
+
+
+async def matchmake(item: dict, vec: list[float]) -> list[dict]:
+    """Matchmaker agent: open requests this new item could fill, best first.
+    Each one gets the item as a suggested match it can claim with /accept."""
+    waiting = await local_demand(item, vec)
     for w in waiting:
         db.insert_matches([{"request_id": w["request_id"], "item_id": item["id"],
                             "score": w["score"], "rank": 0, "status": "suggested",
