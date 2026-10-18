@@ -6,6 +6,7 @@ import os
 # Before app imports; load_dotenv won't override variables that are already set.
 os.environ["DATABASE_URL"] = ""
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["EBAY_APP_ID"] = os.environ["EBAY_CERT_ID"] = ""
 
 import pytest  # noqa: E402
 

@@ -2,13 +2,14 @@
 Flows and ranking rules are specified in docs/02 and docs/05."""
 import asyncio
 from datetime import datetime, timedelta, timezone
-from app.agents import parser, requester, stub_rules
+from app.agents import parser, pricing, requester, stub_rules
 from app.agents.events import emit
 from app.core import config, db, llm
-from app.integrations import marketplace
+from app.integrations import ebay, marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
 from app.schemas import (AcceptOut, AgentEvent, DonateOut, DraftOut, ExpiryOut, Handoff, Item,
-                         Listing, ListItemOut, Match, ParsedItem, RequestOut)
+                         Listing, ListItemOut, Match, ParsedItem, PriceQuote, RequestOut,
+                         SellOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -96,6 +97,50 @@ def _get_draft(draft_id: str) -> dict:
     if row is None or db.now() - row["created_at"] > DRAFT_TTL:
         raise FlowError(404, f"Draft {draft_id} not found, expired, or already used.")
     return row
+
+
+async def sell_draft(draft_id: str) -> SellOut:
+    """S2-S5: eBay comps -> pricing agent; heuristic estimate when eBay can't help.
+    The draft is kept, so the donor can still donate it."""
+    item = _get_draft(draft_id)["item"]
+    found: list[dict] = []
+    if ebay.configured():
+        try:
+            found = await ebay.search(_comps_query(item))
+            emit("orchestrator", f"Found {len(found)} active eBay listings")
+        except ebay.EbayError as e:
+            emit("orchestrator", f"Couldn't reach eBay ({e}); using an estimate")
+
+    quote, basis = None, "estimate"
+    if found:
+        try:
+            quote = await pricing.quote(item, found)
+        except Exception as e:
+            emit("pricing", f"Pricing failed: {e}")
+            raise FlowError(502, f"The pricing model failed: {e}") from e
+        urls = {c["url"] for c in found}
+        quote.comps = [c for c in quote.comps if c.url in urls]   # only real listings
+        basis = "active listings" if quote.comps else "estimate"
+    if basis == "estimate":
+        quote = _estimate(item)
+
+    p = quote.suggested_price
+    label = "currently listed for" if basis == "active listings" else "estimate"
+    emit("pricing", f"Suggested ${p.low:g}–{p.high:g} ({label})",
+         event_type="price_quoted", category=item["category"])
+    return SellOut(draft_id=draft_id, basis=basis, **quote.model_dump())
+
+
+def _comps_query(item: dict) -> str:
+    return " ".join(w for w in (item.get("brand"), item["item"]) if w)
+
+
+def _estimate(item: dict) -> PriceQuote:
+    """docs/05 fallback: category x condition midpoint, +/- 20 %, no comps."""
+    mid = marketplace.suggest_price(item)
+    return PriceQuote.model_validate({
+        "suggested_price": {"low": max(1, round(mid * 0.8)), "high": max(1, round(mid * 1.2))},
+        "comps": [], "listing_draft": pricing.listing_draft(item)})
 
 
 async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:

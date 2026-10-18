@@ -2,7 +2,7 @@
 If these disagree with the docs, the docs win."""
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Category = Literal["outerwear", "tops", "bottoms", "footwear", "accessories",
                    "home", "electronics", "kids", "other"]
@@ -61,6 +61,48 @@ class DonateOut(BaseModel):
     item_id: str
     status: ItemStatus
     message: str
+
+
+class Price(BaseModel):
+    low: float = Field(gt=0)
+    high: float = Field(gt=0)
+    currency: Literal["USD"] = "USD"
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if self.low > self.high:
+            raise ValueError("low must not exceed high")
+        return self
+
+
+class Comp(BaseModel):
+    title: str
+    price: float
+    condition: Optional[str] = None
+    source: Literal["ebay"] = "ebay"
+    url: str
+
+
+class ListingDraft(BaseModel):
+    title: str
+    description: str
+
+    @field_validator("title")
+    @classmethod
+    def _max_80(cls, v: str) -> str:
+        return v.strip()[:80]
+
+
+class PriceQuote(BaseModel):
+    """Pricing agent output (S5)."""
+    suggested_price: Price
+    comps: list[Comp] = Field(default_factory=list)
+    listing_draft: ListingDraft
+
+
+class SellOut(PriceQuote):
+    draft_id: str
+    basis: Literal["active listings", "estimate"]
 
 
 class RequestIn(BaseModel):

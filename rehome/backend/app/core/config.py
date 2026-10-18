@@ -18,6 +18,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 # Vector size of the embedding model; the items/requests columns are created
 # with it (scripts/init_db.py). Changing it means re-running init_db --reset.
 EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
+# eBay Browse API (pricing comps; app-only OAuth). Blank = pricing falls back
+# to the category x condition estimate.
+EBAY_APP_ID = os.getenv("EBAY_APP_ID", "").strip()
+EBAY_CERT_ID = os.getenv("EBAY_CERT_ID", "").strip()
+EBAY_ENV = os.getenv("EBAY_ENV", "production").strip().lower()   # or "sandbox"
+EBAY_MARKETPLACE = os.getenv("EBAY_MARKETPLACE", "EBAY_US").strip()
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 TOP_K = int(os.getenv("TOP_K", "3"))
 

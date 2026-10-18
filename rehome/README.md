@@ -35,15 +35,18 @@ rehome/
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
 │   │   │   ├── orchestrator.py
-│   │   │   ├── parser.py
+│   │   │   ├── parser.py   ← photo/text → ParsedItem (Gemini)
+│   │   │   ├── pricing.py  ← item + eBay comps → price range + listing draft (Modal)
 │   │   │   ├── requester.py
 │   │   │   ├── stub_rules.py ← offline keyword rules used when no model is set
 │   │   │   └── events.py   ← activity feed logger
 │   │   ├── integrations/
-│   │   │   └── marketplace.py ← Nostr NIP-99 listings (Shopstr), pricing
+│   │   │   ├── ebay.py     ← Browse API search (active listings as comps)
+│   │   │   └── marketplace.py ← Nostr NIP-99 listings (Shopstr), heuristic price
 │   │   └── routers/
-│   │       ├── items.py
+│   │       ├── items.py    ← parse, sell, donate (+ legacy one-step donate, list)
 │   │       ├── requests.py
+│   │       ├── matches.py  ← accept a match
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
 │   │       └── events.py
@@ -57,6 +60,10 @@ rehome/
 │       ├── conftest.py     ← fresh in-memory DB per test
 │       ├── test_api.py
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
+│       ├── test_drafts.py  ← parse → donate
+│       ├── test_matches.py ← request → accept
+│       ├── test_parser.py  ← Gemini parser (HTTP faked)
+│       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
 │       ├── test_marketplace.py
 │       └── test_tiger.py   ← Postgres backend; runs only with TEST_DATABASE_URL
 └── frontend/               ← SvelteKit
@@ -192,5 +199,6 @@ Disclosed per HackGB rules.
 | [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
 | [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
 | [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
+| [eBay Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) | Active listings as pricing comps for the Sell path (`EBAY_APP_ID`, `EBAY_CERT_ID`); prices shown as "currently listed for". Without keys, Sell uses a category × condition estimate. |
 | [nostr-sdk](https://pypi.org/project/nostr-sdk/) (rust-nostr Python bindings) | Builds and signs NIP-99 classified listings (kind 30402) and sends them to relays |
 | [Nostr](https://nostr.com) relays + [Shopstr](https://shopstr.store) | Public marketplace where listed items appear; NIP-99 is an open standard, so no API key or developer approval is needed |

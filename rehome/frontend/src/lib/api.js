@@ -18,6 +18,11 @@ export async function parseItem({ images = [], text, zip }) {
   return handle(await fetch(`${BASE}/api/items/parse`, { method: 'POST', body: form }));
 }
 
+/** S1: price a draft. Returns { suggested_price, comps, listing_draft, basis }. */
+export async function sellDraft(draftId) {
+  return handle(await fetch(`${BASE}/api/items/${draftId}/sell`, { method: 'POST' }));
+}
+
 /** N1: donate a draft. Returns { item_id, status, message }. */
 export async function donateDraft(draftId, pickupZip) {
   return handle(
