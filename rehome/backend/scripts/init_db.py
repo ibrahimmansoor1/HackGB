@@ -18,6 +18,9 @@ RESET = """
 DROP MATERIALIZED VIEW IF EXISTS impact_hourly CASCADE;
 DROP TABLE IF EXISTS listings, matches, requests, items, events CASCADE;
 DROP SEQUENCE IF EXISTS item_seq, request_seq, match_seq, listing_seq;
+-- Leftovers if the service was first set up with the shayan-branch schema.
+DROP TABLE IF EXISTS agent_events CASCADE;
+DROP SEQUENCE IF EXISTS item_id_seq, request_id_seq, listing_id_seq;
 """
 
 

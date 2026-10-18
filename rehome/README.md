@@ -52,6 +52,7 @@ rehome/
 │   ├── static/seed/        ← demo item photos (served at /static/seed/…)
 │   ├── scripts/
 │   │   ├── init_db.py      ← creates the Tiger tables from db/schema.sql
+│   │   ├── db_status.py    ← read-only: is the database in DATABASE_URL ready for this code?
 │   │   ├── nostr_keygen.py ← one-time Nostr key setup
 │   │   ├── make_seed_images.py ← redraws static/seed/
 │   │   └── smoke_test.py   ← calls every endpoint on a running server, PASS/FAIL
@@ -160,6 +161,7 @@ With `DATABASE_URL` blank the backend uses the in-memory DB. To use Tiger:
 2. In `.env`, set `DATABASE_URL` to it, and `EMBED_DIM` to the embedding model's vector size (leave `384` for stub embeddings).
 3. From `backend/` with the venv active, create the tables once:
    ```bash
+   python scripts/db_status.py         # read-only check: READY, or which command to run
    python scripts/init_db.py           # safe to re-run
    python scripts/init_db.py --reset   # drop everything and start over (wipes data)
    ```
