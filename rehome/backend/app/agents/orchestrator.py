@@ -106,6 +106,10 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     ranked = ranked[:config.TOP_K]
 
     reasons = await _reasons(query, [r for r, _, _ in ranked])
+    # The reasons call can take seconds with a real model; drop anything that
+    # got listed or reserved meanwhile so we never reserve an unavailable item.
+    ranked = [(row, score, final) for row, score, final in ranked
+              if row["status"] == "available" and row["id"] not in _listing_now]
     matches = [Match(item_id=row["id"], rank=i + 1, score=round(score, 3),
                      reason=reasons.get(row["id"], "Similar to what you asked for"),
                      item=_public(row))

@@ -121,7 +121,9 @@ def find_size(text: str) -> str | None:
     """Only sizes the person actually stated. Never guesses."""
     m = re.search(r"\bsize\s*:?\s*([a-z0-9.]+(?:/[a-z0-9.]+)?)\b", text, re.I)
     if m:
-        return m.group(1).upper() if m.group(1).isalpha() else m.group(1)
+        size = m.group(1)
+        words = {"small": "S", "medium": "M", "large": "L", "xlarge": "XL"}
+        return words.get(size.lower(), size.upper() if size.isalpha() else size)
     m = re.search(r"\b(XXS|XS|XXL|XL|XXXL|\d{1,2}T)\b", text)
     return m.group(1) if m else None
 

@@ -314,3 +314,36 @@ def test_routers_never_import_the_db():
     for f in routers.glob("*.py"):
         src = f.read_text()
         assert not re.search(r"from app\.core import[^\n]*\bdb\b|import app\.core\.db", src), f.name
+
+
+def test_empty_photo_without_note_is_rejected():
+    r = client.post("/api/items", data={"zip": "54301"},
+                    files={"image": ("empty.jpg", b"", "image/jpeg")})
+    assert r.status_code == 400
+    assert client.get("/api/items").json()["items"] == []
+
+
+def test_word_sizes_are_normalized():
+    assert stub_rules.find_size("fleece, size medium") == "M"
+    assert stub_rules.find_size("size L") == "L"
+
+
+def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
+    """With a real model the reasons call is slow; an item listed meanwhile must
+    not be reserved too."""
+    from app.agents import orchestrator
+    client.post("/api/admin/seed")
+    real = orchestrator._reasons
+
+    async def slow_reasons(query, rows):
+        out = await real(query, rows)
+        rows[0]["status"] = "listed"        # someone listed rank 1 meanwhile
+        return out
+    monkeypatch.setattr(orchestrator, "_reasons", slow_reasons)
+
+    body = client.post("/api/requests", json=CHICAGO).json()
+    listed = {i["id"] for i in client.get("/api/items?status=listed").json()["items"]}
+    matched = {m["item_id"] for m in body["matches"]}
+    reserved = {i["id"] for i in client.get("/api/items?status=reserved").json()["items"]}
+    assert listed and not listed & matched and not listed & reserved
+    assert reserved <= matched

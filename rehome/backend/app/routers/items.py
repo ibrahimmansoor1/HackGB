@@ -23,9 +23,11 @@ async def donate_item(zip: str = Form(...), note: str | None = Form(None),
         mime = (image.content_type or "").lower()
         if mime not in IMAGE_TYPES:
             raise HTTPException(415, "Photo must be a JPG, PNG, or WebP image.")
-        image_bytes = await image.read(MAX_BYTES + 1)
-        if len(image_bytes) > MAX_BYTES:
+        image_bytes = await image.read(MAX_BYTES + 1) or None
+        if image_bytes and len(image_bytes) > MAX_BYTES:
             raise HTTPException(413, "Image is larger than 10 MB.")
+        if not image_bytes and not note:
+            raise HTTPException(400, "The photo is empty. Send a photo, a note, or both.")
     item_id = orchestrator.new_item_id()
     if image_bytes:
         name = f"{item_id}.{IMAGE_TYPES[mime]}"

@@ -74,7 +74,7 @@ rehome/
 
 ## Run it
 
-Needs **Python 3.11 or 3.12** (the pinned numpy/pydantic don't install on 3.13+) and **Node 18+**. Every command below starts from the `rehome/` folder:
+Needs **Python 3.11 or 3.12** (the pinned numpy/pydantic don't install on 3.14) and **Node 18+**. Every command below starts from the `rehome/` folder:
 
 ```bash
 git clone https://github.com/shuja-waraich-03/HackGB.git
