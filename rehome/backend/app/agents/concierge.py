@@ -22,7 +22,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agents import orchestrator
 from app.agents.events import emit
-from app.core import config
+from app.core import config, llm
 from app.schemas import HandleOut
 
 MAX_STEPS = 12          # LangGraph recursion limit: about 5 tool rounds
@@ -61,7 +61,8 @@ def _model(tools):
     from langchain_openai import ChatOpenAI
     return ChatOpenAI(model=config.MODAL_AGENT_MODEL, base_url=config.MODAL_ENDPOINT_URL,
                       api_key=config.MODAL_API_KEY or "not-needed", temperature=0.2,
-                      timeout=120, max_retries=1).bind_tools(tools)
+                      timeout=180, max_retries=1, max_tokens=4096,
+                      extra_body=llm.modal_extra_body() or None).bind_tools(tools)
 
 
 # ---- tools (each one is a specialist agent behind the orchestrator) ----------

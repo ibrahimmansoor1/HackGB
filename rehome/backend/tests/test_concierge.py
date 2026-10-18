@@ -98,8 +98,7 @@ def _calls(*names_args):
 
 
 @pytest.fixture
-def model(monkeypatch):
-    monkeypatch.setattr(config, "USE_STUBS", False)
+def model(monkeypatch, modal_mode):
     monkeypatch.setattr(config, "MODAL_AGENT_MODEL", "llm")
     holder = {}
 

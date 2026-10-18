@@ -14,6 +14,19 @@ from app.agents import orchestrator  # noqa: E402
 from app.core import db  # noqa: E402
 
 
+@pytest.fixture
+def modal_mode(monkeypatch):
+    """Act as if Modal is configured (tests fake the model calls), but keep
+    the photo parser on its offline stub so drafts parse without a network."""
+    from app.agents import parser
+    from app.core import config
+    monkeypatch.setattr(config, "USE_STUBS", False)
+
+    async def offline_parse(text, images=None):
+        return parser._stub(text, bool(images))
+    monkeypatch.setattr(parser, "parse_item", offline_parse)
+
+
 @pytest.fixture(autouse=True)
 def fresh_db(monkeypatch):
     for name in ("_items", "_requests", "_listings", "_drafts"):
