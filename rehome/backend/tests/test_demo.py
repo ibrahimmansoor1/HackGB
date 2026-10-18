@@ -347,3 +347,12 @@ def test_item_reserved_during_reason_call_is_not_matched(monkeypatch):
     reserved = {i["id"] for i in client.get("/api/items?status=reserved").json()["items"]}
     assert listed and not listed & matched and not listed & reserved
     assert reserved <= matched
+
+
+def test_seed_image_base_url_overrides_seed_photos(monkeypatch):
+    base = "https://raw.githubusercontent.com/shuja-waraich-03/HackGB/main/rehome/backend/static/seed"
+    monkeypatch.setattr(config, "SEED_IMAGE_BASE_URL", base)
+    client.post("/api/admin/seed")
+    item = client.get("/api/items").json()["items"][0]
+    assert item["image_url"] == f"{base}/puffer-jacket.png"
+    assert marketplace.has_public_image(item)

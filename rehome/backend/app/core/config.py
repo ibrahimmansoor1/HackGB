@@ -33,6 +33,18 @@ def public_url(path: str) -> str:
     return f"{PUBLIC_BASE_URL}/{path.lstrip('/')}"
 
 
+# Optional public home for the demo seed photos, e.g. the repo on GitHub:
+# https://raw.githubusercontent.com/shuja-waraich-03/HackGB/main/rehome/backend/static/seed
+# Set it so seeded items show their photos on Shopstr without a tunnel.
+SEED_IMAGE_BASE_URL = os.getenv("SEED_IMAGE_BASE_URL", "").strip().rstrip("/")
+
+
+def seed_image_url(photo: str) -> str:
+    if SEED_IMAGE_BASE_URL:
+        return f"{SEED_IMAGE_BASE_URL}/{photo}.png"
+    return public_url(f"/static/seed/{photo}.png")
+
+
 # Browser origins allowed to call the API (SvelteKit dev + preview by default).
 CORS_ORIGINS = [o.strip().rstrip("/") for o in os.getenv(
     "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"

@@ -19,7 +19,7 @@ Works as SQL tables or as document collections. If the sponsor DB is document/ve
 |---|---|---|---|
 | id | string PK | orchestrator | `itm_xxxx` |
 | donor_id | string FK | app | |
-| image_url | string \| null | orchestrator | absolute URL: `PUBLIC_BASE_URL` + `/static/uploads/<id>.<ext>` (or `/static/seed/<name>.png` for demo items); `null` if no photo |
+| image_url | string \| null | orchestrator | absolute URL: `PUBLIC_BASE_URL` + `/static/uploads/<id>.<ext>` (demo items: `SEED_IMAGE_BASE_URL/<name>.png` if set, else `/static/seed/<name>.png`); `null` if no photo |
 | note | string | app | donor's free text |
 | zip | string | app | |
 | category | string | parser | e.g. `outerwear` |

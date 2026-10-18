@@ -165,7 +165,9 @@ winget install --id Cloudflare.cloudflared      # once (macOS: brew install clou
 cloudflared tunnel --url http://localhost:8000  # leave running; prints https://<random>.trycloudflare.com
 ```
 
-Put that URL in `.env` as `PUBLIC_BASE_URL=https://<random>.trycloudflare.com`, restart the backend, seed, then list. Keep the backend and the tunnel running while people view the listings: Shopstr loads the photo from your laptop. Relisting an item replaces its old listing (same `d` tag). If a live listing goes out without a public photo, the activity feed says so.
+**No tunnel, seeded items only:** once the GitHub repo is public, set `SEED_IMAGE_BASE_URL=https://raw.githubusercontent.com/shuja-waraich-03/HackGB/<branch>/rehome/backend/static/seed` in `.env` (the branch must contain those photos). Seeded items then use photos hosted by GitHub. Photos donated during the demo still need the tunnel.
+
+**With a tunnel:** put the tunnel URL in `.env` as `PUBLIC_BASE_URL=https://<random>.trycloudflare.com`, restart the backend, seed, then list. Keep the backend and the tunnel running while people view the listings: Shopstr loads the photo from your laptop. Relisting an item replaces its old listing (same `d` tag). If a live listing goes out without a public photo, the activity feed says so.
 
 ## AI tools and APIs used
 

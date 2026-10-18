@@ -167,7 +167,7 @@ async def seed_demo() -> int:
         item_id = db.new_item_id()
         db.insert_item({**parsed, "id": item_id, "donor_id": "demo_donor", "note": note,
                         "zip": zip_code,
-                        "image_url": config.public_url(f"/static/seed/{photo}.png"),
+                        "image_url": config.seed_image_url(photo),
                         "status": "available", "embedding": await llm.embed(_embed_text(parsed)),
                         "created_at": db.now()})
         _seeded.append(item_id)
