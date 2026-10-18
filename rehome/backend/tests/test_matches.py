@@ -23,6 +23,29 @@ def test_query_has_needs_list_and_matches_have_titles():
     assert body["matches"][0]["title"]
 
 
+def test_model_list_fields_as_strings_are_split(monkeypatch, modal_mode):
+    from app.core import llm
+
+    async def model(system, user, images=None):
+        return {"needs": "winter coat", "inferred_context": "cold winters, snow",
+                "must_have": "insulated; water-resistant", "nice_to_have": None,
+                "size": None, "search_text": "insulated water-resistant winter coat"}
+    monkeypatch.setattr(llm, "complete_json", model)
+    q = client.post("/api/requests", json=CHICAGO).json()["query"]
+    assert q["needs"] == ["winter coat"] and q["inferred_context"] == ["cold winters", "snow"]
+    assert q["must_have"] == ["insulated", "water-resistant"] and q["nice_to_have"] == []
+
+
+def test_requester_model_failure_falls_back_to_rules(monkeypatch, modal_mode):
+    from app.core import llm
+
+    async def broken(system, user, images=None):
+        return {"search_text": "x"}            # no needs -> invalid twice
+    monkeypatch.setattr(llm, "complete_json", broken)
+    r = client.post("/api/requests", json=CHICAGO)
+    assert r.status_code == 201 and r.json()["query"]["needs"] == ["winter coat"]
+
+
 def test_accept_reserves_closes_and_notifies():
     body = _request()
     top = body["matches"][0]
