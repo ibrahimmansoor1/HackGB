@@ -281,7 +281,12 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     emit("orchestrator", f"New request from {zip_code}", request_id=req_id,
          event_type="request_made")
 
-    query = await requester.parse_request(text, zip_code)
+    try:
+        query = await requester.parse_request(text, zip_code)
+    except Exception as e:   # model down or unusable reply: keyword rules keep the demo going
+        emit("requester", f"Model reply unusable ({type(e).__name__}); using keyword rules",
+             request_id=req_id)
+        query = requester._stub(text, zip_code)
     ctx = ", ".join(query.inferred_context) or "no extra context"
     need = ", ".join(query.must_have) or "nothing specific"
     emit("requester", f"Inferred {ctx}; needs {need}", request_id=req_id)

@@ -10,6 +10,15 @@ Condition = Literal["new", "like new", "good", "fair"]
 ItemStatus = Literal["available", "listed", "reserved", "donated"]
 
 
+def _as_list(v):
+    """Models sometimes send "a, b" or null where a JSON array belongs."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [p.strip() for p in v.replace(";", ",").split(",") if p.strip()]
+    return v
+
+
 # ---- Agent outputs ---------------------------------------------------------
 class ParsedItem(BaseModel):
     """Parser agent output (D3)."""
@@ -28,6 +37,8 @@ class ParsedItem(BaseModel):
     def _color_default(cls, v):
         return v or "assorted"     # models return null when neither photo nor text says
 
+    _attributes_list = field_validator("attributes", mode="before")(_as_list)
+
 
 class StructuredQuery(BaseModel):
     """Requester agent output (R3)."""
@@ -37,6 +48,9 @@ class StructuredQuery(BaseModel):
     nice_to_have: list[str] = Field(default_factory=list)
     size: Optional[str] = None
     search_text: str
+
+    _lists = field_validator("needs", "inferred_context", "must_have", "nice_to_have",
+                             mode="before")(_as_list)
 
 
 # ---- API models ------------------------------------------------------------

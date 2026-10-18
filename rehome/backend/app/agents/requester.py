@@ -11,6 +11,7 @@ and month, activity, age group. Translate that context into concrete item
 attributes from this vocabulary: {", ".join(stub_rules.ATTRIBUTE_VOCAB)}.
 Return ONLY a JSON object with exactly these keys: needs, inferred_context,
 must_have, nice_to_have, size, search_text.
+- needs, inferred_context, must_have, nice_to_have: JSON arrays of short strings.
 - needs: the core items, as short noun phrases.
 - must_have: attributes without which the item would not serve the need.
 - search_text: one line combining needs and attributes; no location names.
