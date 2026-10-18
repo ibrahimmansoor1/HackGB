@@ -89,6 +89,11 @@ def _is_public_image(url: str | None) -> bool:
     return ip.is_global
 
 
+def has_public_image(item: dict) -> bool:
+    """Shopstr hides listings without a photo it can load."""
+    return _is_public_image(item.get("image_url"))
+
+
 def build_listing_event(item: dict, price: int | float, status: str = "active",
                         published_at: int | None = None, keys: Keys | None = None,
                         created_at: int | None = None):

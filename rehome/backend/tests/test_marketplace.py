@@ -249,3 +249,23 @@ def test_request_never_reserves_an_item_mid_listing(monkeypatch):
     out, req = asyncio.run(race())
     assert out.item.status == "listed"
     assert item_id not in [m.item_id for m in req.matches]
+
+
+def test_live_listing_without_public_photo_warns(monkeypatch):
+    """Shopstr hides listings with no loadable photo; say so in the feed."""
+    _go_live(monkeypatch, FakeClient(accept=RELAYS))
+    item_id = _new_item()                       # note-only donation: no photo
+    assert client.post(f"/api/items/{item_id}/list").status_code == 200
+    msgs = [e["message"] for e in client.get("/api/events").json()["events"]]
+    assert any(m.startswith(f"Heads up: {item_id} has no public photo") for m in msgs)
+
+
+def test_live_listing_with_public_photo_does_not_warn(monkeypatch):
+    from app.agents import orchestrator
+    _go_live(monkeypatch, FakeClient(accept=RELAYS))
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://rehome-demo.example.org")
+    asyncio.run(orchestrator.seed_demo())
+    item_id = client.get("/api/items").json()["items"][0]["id"]
+    assert client.post(f"/api/items/{item_id}/list").status_code == 200
+    msgs = [e["message"] for e in client.get("/api/events").json()["events"]]
+    assert not any(m.startswith("Heads up") for m in msgs)

@@ -158,7 +158,14 @@ uvicorn app.main:app --reload --port 8000
 curl -X POST http://localhost:8000/api/admin/seed
 curl -X POST http://localhost:8000/api/items/itm_0001/list
 ```
-The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. Photo URLs are built from `PUBLIC_BASE_URL`. A listing only gets an `image` tag when that URL is publicly reachable (not `localhost` or a private LAN address), so for photos on Shopstr, expose the backend with a tunnel (e.g. `ngrok http 8000`) and set `PUBLIC_BASE_URL` to the tunnel URL before seeding or donating.
+The response's `listing.url` (`https://shopstr.store/listing/<naddr>`) opens the listing; every listing from your key is also at `https://shopstr.store/marketplace/<npub>`. `relays_accepted` shows which relays stored it. If no relay accepts it, the API returns `502` and the item stays `available`. New listings can take a few seconds to appear on Shopstr. **Shopstr hides listings without a photo**, and it refuses photo links on `localhost` or private LAN addresses. Photo URLs are built from `PUBLIC_BASE_URL`, so for a listing to show up, the backend has to be reachable from the internet. With a free Cloudflare quick tunnel (no account needed):
+
+```powershell
+winget install --id Cloudflare.cloudflared      # once (macOS: brew install cloudflared)
+cloudflared tunnel --url http://localhost:8000  # leave running; prints https://<random>.trycloudflare.com
+```
+
+Put that URL in `.env` as `PUBLIC_BASE_URL=https://<random>.trycloudflare.com`, restart the backend, seed, then list. Keep the backend and the tunnel running while people view the listings: Shopstr loads the photo from your laptop. Relisting an item replaces its old listing (same `d` tag). If a live listing goes out without a public photo, the activity feed says so.
 
 ## AI tools and APIs used
 

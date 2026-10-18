@@ -212,6 +212,10 @@ async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
         db.update_item_status(item_id, "listed")
         how = "(dry run)" if result["dry_run"] else f"— {ok}/{total} relays"
         emit("orchestrator", f"Listed {item_id} on {channel.label} {how}", item_id=item_id)
+        if not result["dry_run"] and not marketplace.has_public_image(row):
+            emit("orchestrator", f"Heads up: {item_id} has no public photo, so {channel.label} "
+                 "hides it. Set PUBLIC_BASE_URL to a public URL (e.g. a tunnel) and relist",
+                 item_id=item_id)
         return ListItemOut(item=_public(db.get_item(item_id)),
                            listing=Listing.model_validate(listing))
     finally:
