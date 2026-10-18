@@ -55,9 +55,12 @@ def main() -> int:
         version = conn.execute("SHOW server_version").fetchone()[0]
         exts = {r[0]: r[1] for r in conn.execute(
             "SELECT extname, extversion FROM pg_extension")}
+        # Real tables only: extension views (pg_stat_statements, pg_buffercache)
+        # live in the same schema on Tiger Cloud and aren't ours.
         rows = conn.execute(
-            "SELECT table_name, column_name FROM information_schema.columns "
-            "WHERE table_schema = current_schema()").fetchall()
+            "SELECT c.table_name, c.column_name FROM information_schema.columns c "
+            "JOIN information_schema.tables t USING (table_schema, table_name) "
+            "WHERE c.table_schema = current_schema() AND t.table_type = 'BASE TABLE'").fetchall()
         actual: dict[str, set[str]] = {}
         for table, column in rows:
             actual.setdefault(table, set()).add(column)
