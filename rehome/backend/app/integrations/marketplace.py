@@ -217,10 +217,18 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
     return accepted, failed
 
 
+# Last created_at signed per listing (`d` tag). Relays keep only the newest
+# version of a replaceable event (whole seconds), so list -> expire -> relist
+# within a second or two must still move forward or the "sold" copy wins.
+_last_created: dict[str, int] = {}
+
+
 async def _publish(item: dict, price: int | float, status: str,
                    published_at: int | None = None, created_at: int | None = None) -> dict:
+    created = max(created_at or Timestamp.now().as_secs(), _last_created.get(item["id"], 0) + 1)
+    _last_created[item["id"]] = created
     ev = build_listing_event(item, price, status, published_at=published_at,
-                             created_at=created_at)
+                             created_at=created)
     relays = list(config.NOSTR_RELAYS)
     live = is_live()
     if live:

@@ -269,3 +269,18 @@ def test_live_listing_with_public_photo_does_not_warn(monkeypatch):
     assert client.post(f"/api/items/{item_id}/list").status_code == 200
     msgs = [e["message"] for e in client.get("/api/events").json()["events"]]
     assert not any(m.startswith("Heads up") for m in msgs)
+
+
+def test_quick_relist_always_supersedes_the_sold_copy(monkeypatch):
+    """list -> expire -> relist in the same second: each version must be newer,
+    or relays keep the 'sold' copy and the relisted item never shows."""
+    fake = FakeClient(accept=RELAYS)
+    _go_live(monkeypatch, fake)
+    item_id = _new_item()
+    assert client.post(f"/api/items/{item_id}/list").status_code == 200
+    assert item_id in client.post("/api/admin/simulate-expiry").json()["expired"]
+    assert client.post(f"/api/items/{item_id}/list").status_code == 200
+    mine = [ev for ev in fake.sent if _tag(ev, "d")[1] == item_id]
+    assert [_tag(ev, "status")[1] for ev in mine] == ["active", "sold", "active"]
+    stamps = [ev.created_at().as_secs() for ev in mine]
+    assert stamps == sorted(stamps) and len(set(stamps)) == 3
