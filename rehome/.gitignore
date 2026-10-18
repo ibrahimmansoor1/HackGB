@@ -1,0 +1,26 @@
+# env / secrets
+.env
+*.env
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# node
+node_modules/
+.svelte-kit/
+build/
+dist/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
+
+# uploaded demo images
+backend/static/uploads/*
+!backend/static/uploads/.gitkeep
