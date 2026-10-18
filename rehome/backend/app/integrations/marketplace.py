@@ -23,6 +23,7 @@ from app.core import config
 KIND_LISTING = 30402
 CURRENCY = "USD"
 SHOPSTR_LISTING_URL = "https://shopstr.store/listing/{naddr}"   # seller: /marketplace/<npub>
+NJUMP_URL = "https://njump.me/{naddr}"   # plain Nostr viewer; works when Shopstr is down
 CONNECT_WAIT_S = 4     # wait for relay sockets before sending
 OK_WAIT_S = 4          # wait for each relay's OK after sending
 TIMEOUT_S = 10         # hard backstop on connect + send, so the API never hangs
@@ -153,9 +154,9 @@ def _signing_keys() -> Keys:
     return _throwaway
 
 
-def _view_url(ev, relays: list[str]) -> str:
-    """Shopstr listing page; Shopstr resolves `naddr` (kind + author + d tag),
-    so the link keeps working after the listing is republished."""
+def _naddr(ev, relays: list[str]) -> str:
+    """`naddr` = kind + author + d tag (+ relay hints). Viewers resolve it to the
+    newest version, so links keep working after the listing is republished."""
     hints = []
     for url in relays[:NADDR_RELAY_HINTS]:
         try:
@@ -164,7 +165,7 @@ def _view_url(ev, relays: list[str]) -> str:
             continue
     d_tag = next(t[1] for t in _tags(ev) if t[0] == "d")
     coord = Coordinate(ev.kind(), ev.author(), d_tag)
-    return SHOPSTR_LISTING_URL.format(naddr=Nip19Coordinate(coord, hints).to_bech32())
+    return Nip19Coordinate(coord, hints).to_bech32()
 
 
 def _tags(ev) -> list[list[str]]:
@@ -226,11 +227,13 @@ async def _publish(item: dict, price: int | float, status: str,
         accepted, failed = await _broadcast(ev, relays)
     else:
         accepted, failed = [], []
+    naddr = _naddr(ev, relays)
     return {"event_id": ev.id().to_hex(),
             "npub": ev.author().to_bech32(),
             "relays_accepted": accepted,
             "relays_failed": failed,
-            "url": _view_url(ev, relays),
+            "url": SHOPSTR_LISTING_URL.format(naddr=naddr),
+            "nostr_url": NJUMP_URL.format(naddr=naddr),
             "published_at": int(next(t[1] for t in _tags(ev) if t[0] == "published_at")),
             "dry_run": not live}
 

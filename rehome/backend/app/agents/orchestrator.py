@@ -7,8 +7,8 @@ from app.agents.events import emit
 from app.core import config, db, llm
 from app.integrations import marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
-from app.schemas import (AgentEvent, ExpiryOut, Item, Listing, ListItemOut, Match,
-                         ParsedItem, RequestOut)
+from app.schemas import (AgentEvent, ExpiryOut, Item, Listing, ListingWithItem, ListItemOut,
+                         Match, ParsedItem, RequestOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -206,7 +206,8 @@ async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
         listing = {"id": db.new_listing_id(), "item_id": item_id, "platform": channel.platform,
                    "external_id": result["event_id"], "price": float(price),
                    "listed_at": listed_at, "expires_at": listed_at + timedelta(days=LISTING_DAYS),
-                   "url": result["url"], "status": "active", "dry_run": result["dry_run"],
+                   "url": result["url"], "nostr_url": result["nostr_url"],
+                   "status": "active", "dry_run": result["dry_run"],
                    "relays_accepted": result["relays_accepted"]}
         db.insert_listing(listing)
         db.update_item_status(item_id, "listed")
@@ -255,5 +256,17 @@ async def expire_listings() -> ExpiryOut:
     return ExpiryOut(expired=expired)
 
 
-def listings(status: str | None = None) -> list[Listing]:
-    return [Listing.model_validate(r) for r in db.list_listings(status)]
+def listings(status: str | None = None) -> list[ListingWithItem]:
+    """Newest first, each with its item so a frontend can render a card."""
+    out = []
+    for r in sorted(db.list_listings(status), key=lambda r: r["listed_at"], reverse=True):
+        row = db.get_item(r["item_id"])
+        if row is not None:
+            out.append(ListingWithItem.model_validate({**r, "item": _public(row)}))
+    return out
+
+
+def listing_for_item(item_id: str) -> ListingWithItem | None:
+    """The item's most recent listing (for the preview page)."""
+    found = [lst for lst in listings() if lst.item_id == item_id]
+    return found[0] if found else None

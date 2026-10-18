@@ -74,10 +74,16 @@ class Listing(BaseModel):
     price: float
     listed_at: datetime
     expires_at: datetime
-    url: str
+    url: str                  # Shopstr page
+    nostr_url: str            # njump.me page: raw listing, works when Shopstr is down
     status: Literal["active", "expired"]
     dry_run: bool
     relays_accepted: list[str] = Field(default_factory=list)
+
+
+class ListingWithItem(Listing):
+    """GET /api/listings: a listing plus its item, enough to render a card."""
+    item: Item
 
 
 class ListItemOut(BaseModel):
