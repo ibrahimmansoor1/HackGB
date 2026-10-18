@@ -20,7 +20,7 @@ Read this before making any change. If you are an AI coding assistant, read this
 | Backend | FastAPI | Decided |
 | Model provider | Modal (vision-capable model) | Decided, Gemini optional |
 | Database | Sponsor DB with vector search; in-memory stub until wired | Open |
-| eBay listing | Stretch | Open |
+| Marketplace listing | Nostr NIP-99 classifieds (kind 30402), shown on Shopstr; dry run by default. eBay/Etsy/Shopify on the roadmap | Decided |
 | Kiosk | Stretch | Open |
 | Project name | "Rehome" (placeholder) | Open |
 
@@ -29,3 +29,4 @@ Read this before making any change. If you are an AI coding assistant, read this
 Add one line per contract change: date, who, what, which files.
 
 - 2026-10-17 · scaffold · initial structure, schemas, and docs
+- 2026-10-18 · ibrahim · marketplace via Nostr NIP-99 (Shopstr): `POST /api/items/{id}/list`, `POST /api/admin/simulate-expiry`, `GET /api/listings`; listings.platform = `nostr` + `url`, `status`, `dry_run`, `relays_accepted` · `docs/02`, `docs/03`, `docs/04`, `docs/06`, `backend/app/integrations/marketplace.py`, `agents/orchestrator.py`, `core/db.py`, `core/config.py`, `schemas.py`, `routers/items.py`, `routers/admin.py`, `routers/listings.py`, `.env.example`

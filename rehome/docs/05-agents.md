@@ -107,3 +107,7 @@ Candidates: {list of item summaries + attributes}
 | Query built | requester | Inferred snow and sub-freezing winters; needs insulated, water-resistant |
 | Search done | orchestrator | Found 3 candidates |
 | Matched | orchestrator | Matched itm_0142 (0.89) and reserved it |
+| Priced *(stretch)* | orchestrator | Priced itm_0142 at $25 (outerwear, like new) |
+| Listed *(stretch)* | orchestrator | Listed itm_0142 on Shopstr — 3/3 relays · or · Listed itm_0142 on Shopstr (dry run) |
+| Listing failed *(stretch)* | orchestrator | Couldn't list itm_0142 on Shopstr — 0/3 relays accepted; item stays available |
+| Expired *(stretch)* | orchestrator | 30 days unsold — itm_0142 moved to donation pool |

@@ -12,6 +12,7 @@
 | Requester agent | `backend/app/agents/requester.py` | Need text → query JSON (text LLM) |
 | Inventory DB | `backend/app/core/db.py` | Items, requests, matches, events, vectors |
 | LLM client | `backend/app/core/llm.py` | Calls Modal (or Gemini) for completions and embeddings |
+| Marketplace channel *(stretch)* | `backend/app/integrations/marketplace.py` | Prices items, signs and sends Nostr NIP-99 listings (shown on Shopstr) |
 
 ## Data flow
 
@@ -54,13 +55,20 @@ flowchart TD
 - Apps only talk to the orchestrator through the HTTP API.
 - Every step emits an event to `agent_events`.
 
-## Stretch flow: eBay + 30-day rule
+## Stretch flow: marketplace (Nostr / Shopstr) + 30-day rule
 
 ```mermaid
 flowchart LR
-  I[Item available] --> L[Post to eBay sandbox<br/>status = listed]
-  L -->|sold| S[Remove from inventory]
-  L -->|30 days, unsold| A[status = available<br/>donation pool]
+  I[Item available] --> P[suggest_price<br/>category × condition]
+  P --> L[Sign NIP-99 listing, kind 30402<br/>send to relays · status = listed]
+  L -. "public" .-> S[Shopstr / any Nostr client]
+  L -->|sold| X[Remove from inventory]
+  L -->|30 days, unsold| A[Republish status = sold<br/>item → available, donation pool]
 ```
+
+- `backend/app/integrations/marketplace.py` builds and signs the listing (`d` tag = item id, so republishing replaces it) and sends it to `NOSTR_RELAYS` with an ~8 s cap. Only the orchestrator calls it; it never touches the DB.
+- Dry run by default: without `NOSTR_NSEC`, or with `MARKETPLACE_DRY_RUN=true`, events are signed with a throwaway key and not sent.
+- Live mode with zero relays accepting → item stays `available`, error event, `502`.
+- Channels share one small interface (`Channel`: `publish`, `mark_sold`). **Roadmap:** eBay (developer approval pending), Etsy, Shopify, each as another `Channel` in `CHANNELS`.
 
 For the demo, a `POST /api/admin/simulate-expiry` endpoint fast-forwards the 30 days.

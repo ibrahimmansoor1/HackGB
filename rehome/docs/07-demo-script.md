@@ -6,7 +6,7 @@
 2. **Donate (30 s).** Photograph a real jacket at the table. Point at the feed as the parser identifies it and stores it.
 3. **Request (45 s).** Type: "need a warm coat, moving to Chicago in December." Point at the feed: the agent inferred snow and cold without being told. Show the match and its reason, ideally the jacket just donated.
 4. **How it works (20 s).** Show the architecture diagram: orchestrator, two specialized agents, vector search, multimodal input.
-5. **Close (10 s).** Stretch features if built (eBay, 30-day rule, kiosk). Sponsor tracks used.
+5. **Close (10 s).** Stretch features if built (live Shopstr listing via Nostr, 30-day rule, kiosk). Sponsor tracks used.
 
 **Backup:** if the network or model fails, have a screen recording of the full flow ready.
 

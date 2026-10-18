@@ -79,13 +79,19 @@ Works as SQL tables or as document collections. If the sponsor DB is document/ve
 
 | Field | Type | Writer | Notes |
 |---|---|---|---|
-| id | string PK | orchestrator | |
+| id | string PK | orchestrator | `lst_xxxx` |
 | item_id | string FK | orchestrator | |
-| platform | string | orchestrator | `ebay` |
-| external_id | string | orchestrator | eBay listing id |
-| price | float | orchestrator | |
-| listed_at | timestamp | orchestrator | |
+| platform | string | orchestrator | `nostr` (NIP-99 classified, shown on Shopstr). Roadmap: `ebay`, `etsy`, `shopify` |
+| external_id | string | orchestrator | Nostr event id (hex) |
+| price | float | orchestrator | USD, from `suggest_price` |
+| listed_at | timestamp | orchestrator | = the event's `published_at` |
 | expires_at | timestamp | orchestrator | `listed_at + 30 days` |
+| url | string | orchestrator | public link, `https://shopstr.store/listing/<naddr>` |
+| status | string | orchestrator | `active` · `expired` |
+| dry_run | bool | orchestrator | `true` = signed locally, never sent to relays |
+| relays_accepted | string[] | orchestrator | relays that stored the event (`[]` in dry run) |
+
+The Nostr event never contains `donor_id`, `note`, or other personal data: only catalog fields, price, and `location` (`LISTING_LOCATION`, else the item's zip).
 
 ## Status lifecycle
 
@@ -94,4 +100,5 @@ items:     available ──(stretch)──▶ listed ──30d unsold──▶ a
                │                       │
                └──matched──▶ reserved ─┴─▶ donated
 requests:  open ──▶ matched ──▶ closed
+listings:  active ──30d (simulate-expiry)──▶ expired
 ```

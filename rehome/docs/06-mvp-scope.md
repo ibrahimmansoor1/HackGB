@@ -11,7 +11,7 @@
 ## Stretch (only after MVP is solid)
 
 1. 30-day rule with a "simulate 30 days" button (easiest)
-2. eBay sandbox listing (one successful post is enough)
+2. Marketplace listing on Nostr, visible on Shopstr (one successful live post is enough). eBay/Etsy/Shopify are roadmap.
 3. Hardware kiosk: webcam capture + distance-sensor prompts
 4. Voice input on requester page
 5. Swap model provider to Gemini if credits arrive
@@ -24,7 +24,7 @@
 | DB + embeddings | _TBD_ | `backend/app/core/db.py`, `core/llm.py` |
 | API routes | _TBD_ | `backend/app/routers/` |
 | Frontend | _TBD_ | `frontend/` |
-| eBay + 30-day (stretch) | _TBD_ | `backend/app/integrations/` (create) |
+| Marketplace (Nostr/Shopstr) + 30-day (stretch) | ibrahim | `backend/app/integrations/marketplace.py` |
 | Kiosk (stretch) | _TBD_ | `kiosk/` (create) |
 | Pitch, slides, Devpost video | _TBD_ | `docs/07-demo-script.md` |
 

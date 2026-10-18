@@ -12,7 +12,7 @@ The other side has friction too. People who need things (and the organizations s
 
 Two entry points and a team of AI agents in between.
 
-- **Donors** take a photo or type a short description. Agents identify the item, write a structured listing, and store it. *(Stretch: list it on eBay; if unsold after 30 days, release it to the donation pool.)*
+- **Donors** take a photo or type a short description. Agents identify the item, write a structured listing, and store it. *(Stretch: list it for sale on Nostr, where it shows on Shopstr; if unsold after 30 days, release it to the donation pool. eBay/Etsy/Shopify are roadmap.)*
 - **Requesters** describe what they need in plain language. Agents infer the context (Chicago in December means insulated and waterproof), search the inventory by similarity, and return ranked matches with a reason for each.
 
 ## One-line pitch
