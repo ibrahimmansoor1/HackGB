@@ -72,22 +72,34 @@ rehome/
 │       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
 │       ├── test_marketplace.py
 │       └── test_tiger.py   ← Postgres backend; runs only with TEST_DATABASE_URL
-└── frontend/               ← SvelteKit
+└── frontend/               ← SvelteKit + Tailwind CSS v4 + Lucide icons
     ├── package.json
     ├── svelte.config.js
     ├── vite.config.js
     └── src/
         ├── app.html
+        ├── app.css         ← Tailwind entry + color/font tokens (light and dark)
         ├── lib/
         │   ├── api.js      ← the ONLY file that calls the backend
+        │   ├── pending.js  ← hands a photo picked on the landing page to /donate
         │   ├── ActivityFeed.svelte
-        │   └── ImpactStats.svelte ← /api/impact tiles + per-category table
+        │   ├── ImpactStats.svelte ← /api/impact tiles + per-category table
+        │   ├── components/SiteHeader.svelte
+        │   └── landing/
+        │       ├── ascii-home.js       ← three.js scene redrawn as ASCII (hero)
+        │       ├── AsciiHome.svelte
+        │       ├── figures.js          ← isometric line drawings for "How it works"
+        │       ├── WireFigure.svelte
+        │       ├── ItemTag.svelte      ← inventory item as a hang tag
+        │       └── LiveActivity.svelte ← compact agent feed
         └── routes/
-            ├── +layout.svelte
-            ├── +page.svelte        ← landing: donate or request
-            ├── donate/+page.svelte ← photo/text → sell or donate
-            ├── request/+page.svelte ← need → matches → claim
-            └── feed/+page.svelte   ← impact dashboard + activity feed for the demo laptop
+            ├── +layout.svelte      ← fonts, header
+            ├── +page.svelte        ← landing: give or get help
+            └── (app)/              ← task pages share a narrow layout
+                ├── +layout.svelte
+                ├── donate/+page.svelte  ← photo/text → let Rehome handle it, or sell / donate
+                ├── request/+page.svelte ← need → matches → claim
+                └── feed/+page.svelte    ← impact dashboard + activity feed for the demo laptop
 ```
 
 ## Run it

@@ -1,7 +1,9 @@
 <script>
+  import { page } from '$app/state';
   import { requestItem, acceptMatch } from '$lib/api.js';
 
-  let text = $state('');
+  // The landing page passes what you typed as ?q=
+  let text = $state(page.url.searchParams.get('q') ?? '');
   let zip = $state('');
   let loading = $state(false);
   let error = $state('');

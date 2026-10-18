@@ -1,7 +1,18 @@
 <script>
   import { parseItem, sellDraft, donateDraft, handleDraft } from '$lib/api.js';
+  import { takePendingPhoto } from '$lib/pending.js';
 
-  let images = $state([]);
+  // A photo picked on the landing page arrives here ready to go.
+  const pending = takePendingPhoto();
+  let images = $state(pending ? [pending] : []);
+  let preview = $state(null);
+
+  $effect(() => {
+    if (!images.length) { preview = null; return; }
+    const url = URL.createObjectURL(images[0]);
+    preview = url;
+    return () => URL.revokeObjectURL(url);
+  });
   let text = $state('');
   let zip = $state('');
   let loading = $state('');
@@ -48,6 +59,7 @@
   <label for="photo">Photos</label>
   <input id="photo" type="file" accept="image/*" capture="environment" multiple
     onchange={(e) => (images = [...(e.currentTarget.files ?? [])])} />
+  {#if preview}<img src={preview} alt="Preview of what you are giving" width="160" />{/if}
 
   <label for="text">Anything we should know? (optional)</label>
   <textarea id="text" rows="2" bind:value={text} placeholder="Barely worn, size M"></textarea>

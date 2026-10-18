@@ -21,6 +21,7 @@ Read this before making any change. If you are an AI coding assistant, read this
 | Decision | Choice | Status |
 |---|---|---|
 | Frontend | SvelteKit (Svelte 5), served on a **GoDaddy Registry** domain | Decided |
+| Frontend styling | Tailwind CSS v4, Lucide icons (`@lucide/svelte`), bundled fonts; three.js only on the landing hero | Decided |
 | Backend | FastAPI on **Vultr or DigitalOcean** | Decided; host not picked |
 | Orchestrator | Deterministic Python, not an LLM loop; UI choice decides sell vs donate | Decided |
 | Input parser | Gemini API (vision) | Decided |

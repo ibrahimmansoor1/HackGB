@@ -1,28 +1,19 @@
 <script>
-  // Placeholder styling. Frontend owner: replace freely; keep api.js as the only backend caller.
+  // Fonts are bundled (not loaded from Google) so the demo works on bad venue wifi.
+  import '../app.css';
+  import '@fontsource-variable/bricolage-grotesque/opsz.css';
+  import '@fontsource-variable/figtree';
+  import '@fontsource/dm-mono/400.css';
+  import '@fontsource/dm-mono/500.css';
+  import SiteHeader from '$lib/components/SiteHeader.svelte';
+
   let { children } = $props();
 </script>
 
-<header>
-  <a href="/" class="brand">Rehome</a>
-  <nav>
-    <a href="/donate">Give something</a>
-    <a href="/request">Find something</a>
-    <a href="/feed">Agent activity</a>
-  </nav>
-</header>
+<svelte:head>
+  <title>ReHome</title>
+  <meta name="description" content="Give away what you don't use with one photo, or ask for what you need in one sentence." />
+</svelte:head>
 
-<main>{@render children()}</main>
-
-<style>
-  :global(body) { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5; }
-  header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid #ddd; }
-  nav { display: flex; gap: 1.25rem; }
-  a { color: inherit; }
-  .brand { font-weight: 700; text-decoration: none; }
-  main { max-width: 44rem; margin: 2rem auto; padding: 0 1.5rem; }
-  :global(label) { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
-  :global(input), :global(textarea) { width: 100%; padding: 0.5rem; font: inherit; box-sizing: border-box; }
-  :global(button) { margin-top: 1.25rem; padding: 0.6rem 1.2rem; font: inherit; cursor: pointer; }
-  :global(:focus-visible) { outline: 2px solid #1f7a6d; outline-offset: 2px; }
-</style>
+<SiteHeader />
+{@render children()}
