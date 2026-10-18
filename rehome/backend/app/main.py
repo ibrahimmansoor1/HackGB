@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.agents import orchestrator
 from app.core import config
-from app.routers import admin, events, items, listings, matches, requests
+from app.routers import admin, events, impact, items, listings, matches, requests
 
 app = FastAPI(title="Rehome API", version="0.1.0")
 
@@ -19,6 +19,7 @@ app.include_router(items.router)
 app.include_router(requests.router)
 app.include_router(matches.router)
 app.include_router(events.router)
+app.include_router(impact.router)
 app.include_router(admin.router)
 app.include_router(listings.router)
 app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")

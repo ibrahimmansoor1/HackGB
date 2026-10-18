@@ -61,6 +61,11 @@ export async function getEvents(after = 0) {
   return handle(await fetch(`${BASE}/api/events?after=${after}`));
 }
 
+/** Impact dashboard: { totals, by_category, hourly }. */
+export async function getImpact() {
+  return handle(await fetch(`${BASE}/api/impact`));
+}
+
 export async function listItems(status = 'available') {
   return handle(await fetch(`${BASE}/api/items?status=${status}`));
 }

@@ -170,6 +170,25 @@ class ExpiryOut(BaseModel):
     expired: list[str]
 
 
+class CategoryImpact(BaseModel):
+    category: str
+    items_donated: int = 0
+    matches_accepted: int = 0
+
+
+class HourlyImpact(BaseModel):
+    bucket: datetime
+    event_type: str
+    n: int
+
+
+class ImpactOut(BaseModel):
+    """GET /api/impact. totals keys = event_type values, pluralized."""
+    totals: dict[str, int]
+    by_category: list[CategoryImpact]
+    hourly: list[HourlyImpact]     # last 24 h
+
+
 class AgentEvent(BaseModel):
     id: int
     agent: Literal["orchestrator", "parser", "pricing", "requester"]

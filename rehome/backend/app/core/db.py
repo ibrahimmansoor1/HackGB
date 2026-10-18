@@ -154,6 +154,18 @@ def list_events(after: int = 0, limit: int = 50) -> list[dict]:
     return [e for e in _events if e["id"] > after][:limit]
 
 
+def impact_rows() -> list[dict]:
+    """Same rows as Tiger's impact_hourly: hourly counts per event_type + category."""
+    counts: dict[tuple, int] = {}
+    for e in _events:
+        if e.get("event_type"):
+            bucket = e["created_at"].replace(minute=0, second=0, microsecond=0)
+            key = (bucket, e["event_type"], e.get("category"))
+            counts[key] = counts.get(key, 0) + 1
+    return [{"bucket": b, "event_type": t, "category": c, "n": n}
+            for (b, t, c), n in counts.items()]
+
+
 BACKEND = "tiger" if config.DATABASE_URL else "memory"
 if config.DATABASE_URL:
     from app.core.db_pg import *  # noqa: E402,F401,F403  (overrides the stubs above)

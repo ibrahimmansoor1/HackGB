@@ -215,7 +215,7 @@ Reads `impact_hourly` (continuous aggregate).
   "hourly": [ { "bucket": "2026-10-18T13:00:00Z", "event_type": "item_donated", "n": 6 } ]
 }
 ```
-`totals` keys are the `event_type` values, pluralized. `hourly` covers the last 24 h.
+`totals` keys are the `event_type` values, pluralized; all six are always present (all time). `by_category` is sorted by `items_donated`, most first. `hourly` covers the last 24 h, summed over categories, oldest first. Without `DATABASE_URL` the same numbers come from the in-memory events.
 
 ---
 

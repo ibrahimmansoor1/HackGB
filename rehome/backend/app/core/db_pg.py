@@ -223,6 +223,11 @@ def insert_event(row: dict) -> dict:
     return row
 
 
+def impact_rows() -> list[dict]:
+    """The continuous aggregate (real-time, so the newest events are included)."""
+    return _all("SELECT bucket, event_type, category, n FROM impact_hourly")
+
+
 def list_events(after: int = 0, limit: int = 50) -> list[dict]:
     return _all("""SELECT id, agent, event_type, item_id, request_id, category, message,
                           time AS created_at

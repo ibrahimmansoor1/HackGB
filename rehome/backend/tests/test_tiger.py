@@ -156,6 +156,22 @@ def test_drafts_roundtrip_and_pop_once(pg):
     assert pg.pop_draft(draft_id) is None and pg.get_draft(draft_id) is None
 
 
+def test_impact_aggregate_sees_fresh_events(pg):
+    with pg._db().connection() as conn:
+        has_view = conn.execute("SELECT to_regclass('impact_hourly') IS NOT NULL AS ok"
+                                ).fetchone()["ok"]
+    if not has_view:
+        pytest.skip("TimescaleDB not available")
+    before = sum(r["n"] for r in pg.impact_rows() if r["event_type"] == "match_accepted")
+    for _ in range(2):
+        pg.insert_event({"agent": "orchestrator", "message": "x", "event_type": "match_accepted",
+                         "category": "home", "created_at": pg.now()})
+    pg.insert_event({"agent": "orchestrator", "message": "untyped", "created_at": pg.now()})
+    rows = [r for r in pg.impact_rows() if r["event_type"] == "match_accepted"]
+    assert sum(r["n"] for r in rows) == before + 2     # real-time: no refresh needed
+    assert all(r["event_type"] is not None for r in pg.impact_rows())
+
+
 def test_events_feed_order_and_fields(pg):
     a = pg.insert_event({"agent": "parser", "message": "one", "event_type": "item_parsed",
                          "category": "outerwear", "created_at": pg.now()})

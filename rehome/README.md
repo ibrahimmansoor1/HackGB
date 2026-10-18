@@ -47,6 +47,7 @@ rehome/
 │   │       ├── items.py    ← parse, sell, donate (+ legacy one-step donate, list)
 │   │       ├── requests.py
 │   │       ├── matches.py  ← accept a match
+│   │       ├── impact.py   ← dashboard stats
 │   │       ├── admin.py    ← demo seed data, simulate-expiry
 │   │       ├── listings.py
 │   │       └── events.py
@@ -62,6 +63,7 @@ rehome/
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
 │       ├── test_drafts.py  ← parse → donate
 │       ├── test_matches.py ← request → accept
+│       ├── test_impact.py  ← /api/impact
 │       ├── test_parser.py  ← Gemini parser (HTTP faked)
 │       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
 │       ├── test_marketplace.py
@@ -74,13 +76,14 @@ rehome/
         ├── app.html
         ├── lib/
         │   ├── api.js      ← the ONLY file that calls the backend
-        │   └── ActivityFeed.svelte
+        │   ├── ActivityFeed.svelte
+        │   └── ImpactStats.svelte ← /api/impact tiles + per-category table
         └── routes/
             ├── +layout.svelte
             ├── +page.svelte        ← landing: donate or request
-            ├── donate/+page.svelte
-            ├── request/+page.svelte
-            └── feed/+page.svelte   ← full-screen activity feed for the demo laptop
+            ├── donate/+page.svelte ← photo/text → sell or donate
+            ├── request/+page.svelte ← need → matches → claim
+            └── feed/+page.svelte   ← impact dashboard + activity feed for the demo laptop
 ```
 
 ## Run it

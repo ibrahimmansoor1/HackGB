@@ -7,8 +7,8 @@ from app.agents.events import emit
 from app.core import config, db, llm
 from app.integrations import ebay, marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
-from app.schemas import (AcceptOut, AgentEvent, DonateOut, DraftOut, ExpiryOut, Handoff, Item,
-                         Listing, ListItemOut, Match, ParsedItem, PriceQuote, RequestOut,
+from app.schemas import (AcceptOut, AgentEvent, CategoryImpact, DonateOut, DraftOut, ExpiryOut,
+                         Handoff, HourlyImpact, ImpactOut, Item, Listing, ListItemOut, Match, ParsedItem, PriceQuote, RequestOut,
                          SellOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
@@ -60,6 +60,34 @@ def items(status: str | None = None) -> list[Item]:
 
 def events(after: int = 0) -> list[AgentEvent]:
     return [AgentEvent.model_validate(e) for e in db.list_events(after)]
+
+
+IMPACT_TOTALS = {"item_parsed": "items_parsed", "item_donated": "items_donated",
+                 "price_quoted": "prices_quoted", "request_made": "requests_made",
+                 "match_made": "matches_made", "match_accepted": "matches_accepted"}
+
+
+def impact() -> ImpactOut:
+    """Dashboard stats from impact_hourly (docs/04)."""
+    totals = dict.fromkeys(IMPACT_TOTALS.values(), 0)
+    by_cat: dict[str, CategoryImpact] = {}
+    hourly: dict[tuple, int] = {}
+    since = (db.now() - timedelta(hours=24)).replace(minute=0, second=0, microsecond=0)
+    for r in db.impact_rows():
+        key = IMPACT_TOTALS.get(r["event_type"])
+        if key is None:
+            continue
+        totals[key] += r["n"]
+        if r["category"] and key in ("items_donated", "matches_accepted"):
+            cat = by_cat.setdefault(r["category"], CategoryImpact(category=r["category"]))
+            setattr(cat, key, getattr(cat, key) + r["n"])
+        if r["bucket"] >= since:
+            k = (r["bucket"], r["event_type"])
+            hourly[k] = hourly.get(k, 0) + r["n"]
+    return ImpactOut(
+        totals=totals,
+        by_category=sorted(by_cat.values(), key=lambda c: (-c.items_donated, c.category)),
+        hourly=[HourlyImpact(bucket=b, event_type=t, n=n) for (b, t), n in sorted(hourly.items())])
 
 
 def db_backend() -> str:

@@ -45,6 +45,7 @@
   .agent { font-weight: 600; }
   .parser .agent { color: #6b4fbb; }
   .requester .agent { color: #1f7a6d; }
+  .pricing .agent { color: #a15c00; }
   .error { color: #b00020; }
   .muted { color: #777; }
 </style>
