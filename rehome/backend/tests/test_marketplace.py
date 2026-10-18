@@ -284,3 +284,30 @@ def test_quick_relist_always_supersedes_the_sold_copy(monkeypatch):
     assert [_tag(ev, "status")[1] for ev in mine] == ["active", "sold", "active"]
     stamps = [ev.created_at().as_secs() for ev in mine]
     assert stamps == sorted(stamps) and len(set(stamps)) == 3
+
+
+def test_failed_relays_explain_why(monkeypatch):
+    """The 502 and the feed say why each relay refused, so 'network blocks
+    Nostr' can be told apart from a real rejection."""
+    _go_live(monkeypatch, FakeClient(accept=()))
+    item_id = _new_item()
+    r = client.post(f"/api/items/{item_id}/list")
+    assert r.status_code == 502
+    assert "relay.one: blocked" in r.json()["detail"]
+    msgs = [e["message"] for e in client.get("/api/events").json()["events"]]
+    assert any(m.startswith(f"Couldn't list {item_id} on Shopstr — 0/3") and "blocked" in m
+               for m in msgs)
+
+
+def test_hanging_relays_report_a_timeout(monkeypatch):
+    monkeypatch.setattr(marketplace, "TIMEOUT_S", 0.2)
+    _go_live(monkeypatch, FakeClient(accept=RELAYS, hang=True))
+    out = asyncio.run(marketplace.publish_listing(ITEM, 25))
+    assert set(out["relay_errors"]) == set(RELAYS)
+    assert all("timed out" in msg for msg in out["relay_errors"].values())
+
+
+def test_health_reports_marketplace_mode(monkeypatch):
+    assert client.get("/api/health").json()["marketplace"] == "dry_run"
+    _go_live(monkeypatch, FakeClient(accept=RELAYS))
+    assert client.get("/api/health").json()["marketplace"] == "live"

@@ -230,9 +230,14 @@ async def list_item(item_id: str, platform: str = "nostr") -> ListItemOut:
         ok = len(result["relays_accepted"])
         total = ok + len(result["relays_failed"])
         if not result["dry_run"] and ok == 0:
+            why = "; ".join(f"{url.removeprefix('wss://')}: {msg}"
+                            for url, msg in result.get("relay_errors", {}).items())
             emit("orchestrator", f"Couldn't list {item_id} on {channel.label} — 0/{total} relays "
-                 "accepted; item stays available", item_id=item_id)
-            raise FlowError(502, f"No {channel.label} relay accepted the listing (0/{total}).")
+                 f"accepted; item stays available ({why or 'no reason given'})", item_id=item_id)
+            raise FlowError(502, f"No {channel.label} relay accepted the listing (0/{total}). "
+                            f"{why or 'No reason given.'} If every relay timed out, this network "
+                            "probably blocks Nostr: try a phone hotspot, or set "
+                            "MARKETPLACE_DRY_RUN=true.")
 
         listed_at = datetime.fromtimestamp(result["published_at"], timezone.utc)
         listing = {"id": db.new_listing_id(), "item_id": item_id, "platform": channel.platform,
@@ -286,6 +291,11 @@ async def expire_listings() -> ExpiryOut:
         emit("orchestrator", f"30 days unsold — {row['id']} moved to donation pool{note}",
              item_id=row["id"])
     return ExpiryOut(expired=expired)
+
+
+def marketplace_mode() -> str:
+    """'live' when listings really go to Nostr relays, else 'dry_run'."""
+    return "live" if marketplace.is_live() else "dry_run"
 
 
 def listings(status: str | None = None) -> list[ListingWithItem]:

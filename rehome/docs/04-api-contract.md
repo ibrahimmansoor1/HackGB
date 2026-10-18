@@ -22,9 +22,9 @@ This file is the contract between frontend and backend. Change it here first.
 ## `GET /api/health`
 
 ```json
-{ "status": "ok", "stubs": true, "db": "memory" }
+{ "status": "ok", "stubs": true, "db": "memory", "marketplace": "dry_run" }
 ```
-`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`.
+`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`. `marketplace` is `"live"` when listings really go to Nostr relays (`NOSTR_NSEC` set and `MARKETPLACE_DRY_RUN=false`), else `"dry_run"`.
 
 ---
 
@@ -265,7 +265,7 @@ No request body.
 - `external_id` is the Nostr event id (hex). `url` opens the listing on Shopstr (an `naddr` link, so it survives republishing). In a dry run the URL is well-formed but nothing was published; `dry_run` is `true` and `relays_accepted` is `[]`.
 - `price` comes from a per-category default × condition multiplier (whole dollars, min $1).
 
-**Errors:** `404` item not found · `409` item is not `available` (already listed, reserved, donated, or being listed) · `502` live mode and no relay accepted the event (or `NOSTR_NSEC` is invalid); the item stays `available`.
+**Errors:** `404` item not found · `409` item is not `available` (already listed, reserved, donated, or being listed) · `502` live mode and no relay accepted the event (or `NOSTR_NSEC` is invalid); the item stays `available`. The `detail` names each relay's reason (e.g. `relay.damus.io: relay not connected; nos.lol: timeout`): timeouts on every relay mean the network blocks Nostr (use a hotspot or dry run).
 
 ### `POST /api/admin/simulate-expiry`
 

@@ -26,4 +26,5 @@ app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "stubs": config.USE_STUBS, "db": orchestrator.db_backend()}
+    return {"status": "ok", "stubs": config.USE_STUBS, "db": orchestrator.db_backend(),
+            "marketplace": orchestrator.marketplace_mode()}

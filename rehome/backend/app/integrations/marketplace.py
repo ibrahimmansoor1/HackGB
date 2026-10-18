@@ -182,12 +182,14 @@ def _new_client() -> Client:
     return Client()
 
 
-async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
-    """Send a signed event. Returns (accepted, failed) relay URLs; never raises,
+async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str], dict[str, str]]:
+    """Send a signed event. Returns (accepted, failed, errors): relay URLs, plus
+    why each failed relay refused (its OK message, or a timeout). Never raises,
     never takes longer than ~TIMEOUT_S."""
     client = _new_client()
     accepted: list[str] = []
     failed: list[str] = []
+    errors: dict[str, str] = {}
     added: dict[str, str] = {}   # normalized relay URL -> URL as configured
     for url in relays:
         try:
@@ -196,6 +198,7 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
             added[_norm(parsed)] = url
         except Exception:
             failed.append(url)
+            errors[url] = "invalid relay URL"
 
     async def _send():
         await client.connect(timedelta(seconds=CONNECT_WAIT_S))
@@ -203,18 +206,28 @@ async def _broadcast(ev, relays: list[str]) -> tuple[list[str], list[str]]:
         return await client.send_event(ev, ok_timeout=timedelta(seconds=OK_WAIT_S))
 
     if added:
+        reasons: dict[str, str] = {}
         try:
             out = await asyncio.wait_for(_send(), timeout=TIMEOUT_S)
             ok = {_norm(u) for u in out.success}
             accepted = [url for key, url in added.items() if key in ok]
-        except Exception:   # timeout or SDK error: nothing confirmed
+            reasons = {_norm(u): str(msg) for u, msg in (out.failed or {}).items()}
+            default = f"no reply within {OK_WAIT_S}s (couldn't connect?)"
+        except asyncio.TimeoutError:
             accepted = []
-        failed += [url for url in added.values() if url not in accepted]
+            default = f"timed out after {TIMEOUT_S}s (couldn't connect?)"
+        except Exception as e:   # SDK error: nothing confirmed
+            accepted = []
+            default = f"error: {e}"[:160]
+        for key, url in added.items():
+            if url not in accepted:
+                failed.append(url)
+                errors[url] = (reasons.get(key) or default)[:160]
     try:
         await asyncio.wait_for(client.disconnect(), timeout=2)
     except Exception:
         pass
-    return accepted, failed
+    return accepted, failed, errors
 
 
 # Last created_at signed per listing (`d` tag). Relays keep only the newest
@@ -232,14 +245,15 @@ async def _publish(item: dict, price: int | float, status: str,
     relays = list(config.NOSTR_RELAYS)
     live = is_live()
     if live:
-        accepted, failed = await _broadcast(ev, relays)
+        accepted, failed, errors = await _broadcast(ev, relays)
     else:
-        accepted, failed = [], []
+        accepted, failed, errors = [], [], {}
     naddr = _naddr(ev, relays)
     return {"event_id": ev.id().to_hex(),
             "npub": ev.author().to_bech32(),
             "relays_accepted": accepted,
             "relays_failed": failed,
+            "relay_errors": errors,
             "url": SHOPSTR_LISTING_URL.format(naddr=naddr),
             "nostr_url": NJUMP_URL.format(naddr=naddr),
             "published_at": int(next(t[1] for t in _tags(ev) if t[0] == "published_at")),
@@ -248,7 +262,7 @@ async def _publish(item: dict, price: int | float, status: str,
 
 async def publish_listing(item: dict, price: int | float) -> dict:
     """Post a new active listing. Returns {event_id, npub, relays_accepted,
-    relays_failed, url, published_at, dry_run}."""
+    relays_failed, relay_errors, url, nostr_url, published_at, dry_run}."""
     return await _publish(item, price, "active")
 
 
