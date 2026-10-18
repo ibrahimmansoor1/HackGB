@@ -151,6 +151,13 @@ npm run dev   # http://localhost:5173
 
 The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`) from `frontend/.env` (copy `frontend/.env.example`).
 
+**Feature-check page (Streamlit, no Node needed).** Clicks through every endpoint: parse → sell / donate, request → claim, inventory, listing + 30-day expiry, impact, activity feed. With the backend running, from `backend/` with the venv active:
+```bash
+pip install -r requirements-verify.txt
+streamlit run tools/verify_app.py   # http://localhost:8501
+```
+Set `REHOME_API` (or the sidebar field) to check another backend.
+
 **Two laptops (app + feed screen):** laptop 1 runs everything; laptop 2 only opens a browser.
 1. Laptop 1, backend: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. In `rehome/.env` set `PUBLIC_BASE_URL=http://<laptop 1 IP>:8000` (photo links) and add `http://<laptop 1 IP>:5173` to `CORS_ORIGINS`.
 2. Laptop 1, frontend: in `frontend/.env` set `PUBLIC_API_URL=http://<laptop 1 IP>:8000`, then `npm run dev -- --host`.

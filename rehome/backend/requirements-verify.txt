@@ -1,0 +1,2 @@
+# Optional: the Streamlit feature-check page (tools/verify_app.py). Not needed to run the API.
+streamlit==1.41.1
