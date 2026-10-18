@@ -7,6 +7,7 @@ import os
 os.environ["DATABASE_URL"] = ""
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["EBAY_APP_ID"] = os.environ["EBAY_CERT_ID"] = ""
+os.environ["SEED_IMAGE_BASE_URL"] = ""
 
 import pytest  # noqa: E402
 
