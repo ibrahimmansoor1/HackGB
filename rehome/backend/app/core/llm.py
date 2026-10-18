@@ -12,7 +12,7 @@ import httpx
 import numpy as np
 from app.core import config
 
-EMBED_DIM = 384
+EMBED_DIM = config.EMBED_DIM
 
 
 def _headers() -> dict:

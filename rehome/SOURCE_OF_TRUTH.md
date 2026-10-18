@@ -19,7 +19,7 @@ Read this before making any change. If you are an AI coding assistant, read this
 | Frontend | SvelteKit | Decided |
 | Backend | FastAPI | Decided |
 | Model provider | Modal (vision-capable model) | Decided, Gemini optional |
-| Database | Sponsor DB with vector search; in-memory stub until wired | Open |
+| Database | Tiger Data (Tiger Cloud Postgres + pgvector/pgvectorscale, TimescaleDB); in-memory stub when `DATABASE_URL` is blank | Decided |
 | eBay listing | Stretch | Open |
 | Kiosk | Stretch | Open |
 | Project name | "Rehome" (placeholder) | Open |
@@ -29,3 +29,4 @@ Read this before making any change. If you are an AI coding assistant, read this
 Add one line per contract change: date, who, what, which files.
 
 - 2026-10-17 · scaffold · initial structure, schemas, and docs
+- 2026-10-18 · Shayan · Tiger Data backend for `core/db.py` (same function signatures); schema in `backend/db/schema.sql`; new env vars `EMBED_DIM`, `DB_BACKEND`, `DB_POOL_MAX`; docs/03, docs/08

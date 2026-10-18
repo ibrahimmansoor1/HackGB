@@ -1,7 +1,9 @@
 """Database access. ONLY the orchestrator and events logger import this.
 
-In-memory stub for now so everyone can build in parallel. The DB owner
-replaces these functions with the sponsor database; keep the signatures.
+Two backends with the same functions:
+- DATABASE_URL blank (or DB_BACKEND=memory): the in-memory stub below.
+- DATABASE_URL set: Tiger Data (Postgres + pgvector/pgvectorscale), see
+  db_tiger.py. The functions below are swapped out at the end of this file.
 """
 from datetime import datetime, timezone
 import itertools
@@ -79,3 +81,28 @@ def insert_event(row: dict) -> dict:
 
 def list_events(after: int = 0, limit: int = 50) -> list[dict]:
     return [e for e in _events if e["id"] > after][:limit]
+
+
+# ---- admin (stub) ------------------------------------------------------------
+BACKEND = "memory"
+
+
+def reset() -> None:
+    """Delete every row and restart the id counters."""
+    global _item_ids, _req_ids, _event_ids
+    _items.clear(); _requests.clear(); _matches.clear(); _events.clear()
+    _item_ids, _req_ids, _event_ids = (itertools.count(1) for _ in range(3))
+
+
+def info() -> dict:
+    return {"backend": BACKEND, "rows": {"items": len(_items), "requests": len(_requests),
+                                         "matches": len(_matches), "agent_events": len(_events)}}
+
+
+# ---- Tiger Data ----------------------------------------------------------------
+# With DATABASE_URL set, every function above is replaced by the Tiger Data
+# version (same names and signatures). Callers keep using db.<function>.
+from app.core import config as _config  # noqa: E402
+
+if _config.DB_BACKEND == "tiger":
+    from app.core.db_tiger import *  # noqa: E402,F401,F403

@@ -10,7 +10,16 @@ MODAL_ENDPOINT_URL = os.getenv("MODAL_ENDPOINT_URL", "")
 MODAL_API_KEY = os.getenv("MODAL_API_KEY", "")
 MODAL_VISION_MODEL = os.getenv("MODAL_VISION_MODEL", "")
 MODAL_EMBED_MODEL = os.getenv("MODAL_EMBED_MODEL", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# "tiger" when DATABASE_URL is set, else "memory". Force the in-memory stub
+# (e.g. for tests) with DB_BACKEND=memory.
+DB_BACKEND = (os.getenv("DB_BACKEND", "").strip().lower()
+              or ("tiger" if DATABASE_URL else "memory"))
+DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "5"))
+DB_AUTO_INIT = os.getenv("DB_AUTO_INIT", "true").strip().lower() not in ("false", "0", "no")
+# Size of the embedding vectors; must match MODAL_EMBED_MODEL's output and the
+# vector(N) columns in Tiger Data. Changing it needs `scripts/init_db.py --reset`.
+EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 TOP_K = int(os.getenv("TOP_K", "3"))
 

@@ -2,6 +2,8 @@
 
 Works as SQL tables or as document collections. If the sponsor DB is document/vector-based, store `embedding` inline on `items` and `requests`.
 
+**Storage: Tiger Data.** These are Postgres tables on Tiger Cloud, created by `backend/db/schema.sql`. `embedding` is a pgvector `vector(EMBED_DIM)` column with a pgvectorscale DiskANN cosine index on `items`; `agent_events` is a TimescaleDB hypertable. Setup and details: `docs/08-database.md`.
+
 `writer` = which component sets the field.
 
 ## users *(optional for MVP; hardcode a demo donor and requester)*
