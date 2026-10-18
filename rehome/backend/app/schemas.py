@@ -10,6 +10,15 @@ Condition = Literal["new", "like new", "good", "fair"]
 ItemStatus = Literal["available", "listed", "reserved", "donated"]
 
 
+def _as_list(v):
+    """Models sometimes send "a, b" or null where a JSON array belongs."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [p.strip() for p in v.replace(";", ",").split(",") if p.strip()]
+    return v
+
+
 # ---- Agent outputs ---------------------------------------------------------
 class ParsedItem(BaseModel):
     """Parser agent output (D3)."""
@@ -23,6 +32,13 @@ class ParsedItem(BaseModel):
     attributes: list[str] = Field(default_factory=list)
     summary: str
 
+    @field_validator("color", mode="before")
+    @classmethod
+    def _color_default(cls, v):
+        return v or "assorted"     # models return null when neither photo nor text says
+
+    _attributes_list = field_validator("attributes", mode="before")(_as_list)
+
 
 class StructuredQuery(BaseModel):
     """Requester agent output (R3)."""
@@ -32,6 +48,9 @@ class StructuredQuery(BaseModel):
     nice_to_have: list[str] = Field(default_factory=list)
     size: Optional[str] = None
     search_text: str
+
+    _lists = field_validator("needs", "inferred_context", "must_have", "nice_to_have",
+                             mode="before")(_as_list)
 
 
 # ---- API models ------------------------------------------------------------
@@ -61,6 +80,11 @@ class DonateOut(BaseModel):
     item_id: str
     status: ItemStatus
     message: str
+    waiting_requests: list[str] = Field(default_factory=list)   # matchmaker found these
+
+
+class PostIn(BaseModel):
+    price: Optional[float] = None   # USD; default = category x condition heuristic
 
 
 class Price(BaseModel):
@@ -103,6 +127,25 @@ class PriceQuote(BaseModel):
 class SellOut(PriceQuote):
     draft_id: str
     basis: Literal["active listings", "estimate"]
+
+
+class HandleIn(BaseModel):
+    """What the donor wants; `auto` lets the concierge decide."""
+    preference: Literal["auto", "sell", "donate"] = "auto"
+
+
+class HandleOut(BaseModel):
+    """POST /api/items/{draft_id}/handle: what the concierge agent did."""
+    run_id: str                       # GET /api/events?run_id=... replays every step
+    draft_id: str
+    action: Literal["listed", "donated"]
+    item_id: str
+    summary: str                      # what the concierge tells the donor
+    brain: Literal["modal", "rules"]  # who made the decisions
+    steps: list[str]                  # tools called, in order
+    price_quote: Optional[Price] = None
+    waiting_requests: list[str] = Field(default_factory=list)
+    listing: Optional["Listing"] = None
 
 
 class RequestIn(BaseModel):
@@ -202,11 +245,18 @@ class ImpactOut(BaseModel):
 
 class AgentEvent(BaseModel):
     id: int
-    agent: Literal["orchestrator", "parser", "pricing", "requester"]
+    agent: Literal["orchestrator", "concierge", "parser", "pricing", "requester", "matchmaker"]
     event_type: Optional[Literal["item_parsed", "item_donated", "price_quoted",
                                  "request_made", "match_made", "match_accepted"]] = None
     category: Optional[str] = None
     message: str
     item_id: Optional[str] = None
     request_id: Optional[str] = None
+    run_id: Optional[str] = None        # agent run (concierge) this step belongs to
+    tool: Optional[str] = None          # tool the agent called
+    duration_ms: Optional[int] = None   # how long the tool took
+    data: Optional[dict] = None         # tool result / decision details
     created_at: datetime
+
+
+HandleOut.model_rebuild()   # resolves the forward reference to Listing

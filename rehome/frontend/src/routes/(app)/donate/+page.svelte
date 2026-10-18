@@ -1,5 +1,5 @@
 <script>
-  import { parseItem, sellDraft, donateDraft, listItem } from '$lib/api.js';
+  import { parseItem, sellDraft, donateDraft, postDraft, handleDraft } from '$lib/api.js';
   import { takePendingPhoto } from '$lib/pending.js';
   import ListingInfo from '$lib/ListingInfo.svelte';
 
@@ -16,6 +16,7 @@
   let quote = $state(null);
   let price = $state(null);
   let sold = $state(null);   // { item, listing } once it's listed
+  let handled = $state(null);
 
   $effect(() => {
     if (!images.length) { preview = null; return; }
@@ -34,8 +35,12 @@
   function describe() {
     if (!images.length && !text) { error = 'Add a photo or a short description.'; return; }
     if (!zip) { error = 'Add your zip code.'; return; }
-    draft = null; donated = null; quote = null; sold = null;
+    draft = null; donated = null; quote = null; sold = null; handled = null;
     run('Describing your item…', async () => { draft = await parseItem({ images, text, zip }); });
+  }
+
+  function letAgentsHandle() {
+    run('Our agents are on it…', async () => { handled = await handleDraft(draft.draft_id); });
   }
 
   function sell() {
@@ -48,7 +53,7 @@
 
   function list() {
     if (!(price > 0)) { error = 'Pick a price above $0.'; return; }
-    run('Listing on Shopstr…', async () => { sold = await listItem(draft.draft_id, price); });
+    run('Listing on Shopstr…', async () => { sold = await postDraft(draft.draft_id, price); });
   }
 
   function donate() {
@@ -56,7 +61,8 @@
   }
 
   function startOver() {
-    draft = null; donated = null; quote = null; sold = null; price = null; images = []; text = '';
+    draft = null; donated = null; quote = null; sold = null; price = null; handled = null;
+    images = []; text = '';
   }
 </script>
 
@@ -82,7 +88,11 @@
   <p>{it.summary}</p>
   <p>{it.attributes.join(', ')} · {it.condition}{it.size ? ` · size ${it.size}` : ''}</p>
 
-  {#if donated}
+  {#if handled}
+    <p role="status">{handled.summary}</p>
+    {#if handled.listing}<ListingInfo listing={handled.listing} />{/if}
+    <button onclick={startOver}>Give something else</button>
+  {:else if donated}
     <p role="status">{donated.message}</p>
     <button onclick={startOver}>Give something else</button>
   {:else if sold}
@@ -92,6 +102,10 @@
       See all listings on the <a class="underline" href="/marketplace">marketplace</a>.</p>
     <button onclick={startOver}>Give something else</button>
   {:else}
+    {#if !quote}
+      <button onclick={letAgentsHandle} disabled={!!loading}>Let Rehome handle it</button>
+      <p class="hint">Our agents price it, check who nearby needs it, then sell or donate it for you.</p>
+    {/if}
     {#if quote}
       {@const p = quote.suggested_price}
       <h3>{quote.basis === 'active listings' ? 'Similar items are currently listed for' : 'Estimated value'}:
@@ -119,3 +133,7 @@
 {/if}
 
 {#if error}<p role="alert">{error}</p>{/if}
+
+<style>
+  .hint { color: #666; margin-top: 0.25rem; }
+</style>

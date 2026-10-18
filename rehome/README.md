@@ -22,6 +22,7 @@ rehome/
 │   ├── 05-agents.md        ← agent prompts and JSON schemas
 │   ├── 06-mvp-scope.md     ← what's in, what's stretch, build order, owners
 │   └── 07-demo-script.md   ← expo table walkthrough
+├── infra/modal_llm.py      ← Modal vLLM server (tool calling) for the agents
 ├── backend/                ← FastAPI
 │   ├── requirements.txt
 │   ├── app/
@@ -34,7 +35,8 @@ rehome/
 │   │   │   └── llm.py      ← model clients (Gemini parser, Modal text + embeddings)
 │   │   ├── seed_data.py    ← 18 demo items for POST /api/admin/seed
 │   │   ├── agents/
-│   │   │   ├── orchestrator.py
+│   │   │   ├── concierge.py ← LangGraph agent: prices, checks demand, lists or donates
+│   │   │   ├── orchestrator.py ← deterministic service layer; owns the DB; matchmaker
 │   │   │   ├── parser.py   ← photo/text → ParsedItem (Gemini)
 │   │   │   ├── pricing.py  ← item + eBay comps → price range + listing draft (Modal)
 │   │   │   ├── requester.py
@@ -66,6 +68,8 @@ rehome/
 │       ├── test_demo.py    ← the docs/07 demo end to end, offline
 │       ├── test_drafts.py  ← parse → donate
 │       ├── test_matches.py ← request → accept
+│       ├── test_concierge.py ← concierge agent (rules + faked Modal model)
+│       ├── test_matchmaker.py ← donations filling waiting requests
 │       ├── test_impact.py  ← /api/impact
 │       ├── test_parser.py  ← Gemini parser (HTTP faked)
 │       ├── test_pricing.py ← sell: eBay comps, pricing agent, estimate fallback
@@ -97,7 +101,7 @@ rehome/
             ├── +page.svelte        ← landing: give or get help
             └── (app)/              ← task pages share a narrow layout
                 ├── +layout.svelte
-                ├── donate/+page.svelte      ← photo/text → sell (quote, list on Shopstr) or donate
+                ├── donate/+page.svelte      ← photo/text → let Rehome handle it, or sell (quote, list on Shopstr) / donate
                 ├── request/+page.svelte     ← need → matches → claim
                 ├── marketplace/+page.svelte ← listings + "simulate 30 days"
                 └── feed/+page.svelte        ← impact dashboard + activity feed for the demo laptop
@@ -151,6 +155,13 @@ npm run dev   # http://localhost:5173
 
 The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`) from `frontend/.env` (copy `frontend/.env.example`).
 
+**Feature-check page (Streamlit, no Node needed).** Clicks through every endpoint: parse → sell / donate, request → claim, inventory, listing + 30-day expiry, impact, activity feed. With the backend running, from `backend/` with the venv active:
+```bash
+pip install -r requirements-verify.txt
+streamlit run tools/verify_app.py   # http://localhost:8501
+```
+Set `REHOME_API` (or the sidebar field) to check another backend.
+
 **Two laptops (app + feed screen):** laptop 1 runs everything; laptop 2 only opens a browser.
 1. Laptop 1, backend: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. In `rehome/.env` set `PUBLIC_BASE_URL=http://<laptop 1 IP>:8000` (photo links) and add `http://<laptop 1 IP>:5173` to `CORS_ORIGINS`.
 2. Laptop 1, frontend: in `frontend/.env` set `PUBLIC_API_URL=http://<laptop 1 IP>:8000`, then `npm run dev -- --host`.
@@ -170,6 +181,17 @@ If laptop 1's firewall asks, allow Python and Node on private networks. Find the
 With no `MODAL_ENDPOINT_URL` in `.env`, the backend runs in **stub mode**, and the whole demo still works offline with no keys. Each provider stubs on its own: no `GEMINI_API_KEY` → keyword parser; no `MODAL_ENDPOINT_URL` → stub requester, pricing, reasons, and embeddings. Deterministic keyword rules (`backend/app/agents/stub_rules.py`, described in `docs/05`) parse donor notes and infer context, so "need a warm coat, moving to Chicago in December" matches insulated, water-resistant outerwear with a reason for each match. `GET /api/health` reports `"stubs": true` while stub mode is on.
 
 The in-memory DB resets when the backend restarts. Between demo rehearsals, either restart it or call `POST /api/admin/reset` (closes any live listings first, clears the inventory, keeps the activity feed), then seed again.
+
+## Models on Modal
+
+`infra/modal_llm.py` serves **GLM-5.3-Flash** (320B MoE, 18B active, reads images) as an OpenAI-compatible vLLM server with tool calling on, following [Modal's vLLM example](https://modal.com/docs/examples/vllm_inference) and [vLLM's GLM-5.3-Flash recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash). It runs on 4× H200 and scales to zero after 15 minutes idle; the first boot downloads ~306 GiB of weights into a Modal Volume. One model serves every Modal agent, and the photo parser too until `GEMINI_API_KEY` is set. GLM always reasons before answering; `MODAL_REASONING_EFFORT=low` (default) keeps agent steps quick.
+
+```bash
+pip install modal && modal setup     # once
+modal deploy infra/modal_llm.py                  # prints the URL (https://<workspace>--rehome-llm-serve.us-east.modal.run)
+python infra/check_llm.py <URL>                  # warms it up, checks a tool call and an image
+```
+In `.env`: `MODAL_ENDPOINT_URL=<URL>/v1`, `MODAL_VISION_MODEL=llm`, `MODAL_AGENT_MODEL=llm`. The first request after idle waits for a cold start (a few minutes; requests queue meanwhile), so run `check_llm.py` before the demo. It's a Modal web function on `modal.run` rather than an `@app.server` on `modal.direct`, because some campus networks block `modal.direct`.
 
 ## Database (Tiger Data)
 
@@ -238,6 +260,7 @@ Disclosed per HackGB rules.
 | Tool / API | What we used it for |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) (Anthropic) | AI coding assistant: helped write and review backend code, tests, and docs. Every change was reviewed and committed by the team. |
+| [LangGraph](https://langchain-ai.github.io/langgraph/) + [langchain-openai](https://pypi.org/project/langchain-openai/) | The concierge agent's loop: a Modal tool-calling model chooses which specialist agent (pricing, matchmaker, Shopstr listing, donation) to call, then acts for the donor |
 | [Google Gemini API](https://ai.google.dev) | Input parser: reads donor photos and text into a catalog item, brand and size from visible tags (`GEMINI_API_KEY`, `GEMINI_MODEL`) |
 | [Modal](https://modal.com) | Hosts the text model (requester, pricing, match reasons) and embeddings behind `MODAL_ENDPOINT_URL` (OpenAI-compatible API). Without it, the app runs in offline stub mode. |
 | [eBay Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) | Active listings as pricing comps for the Sell path (`EBAY_APP_ID`, `EBAY_CERT_ID`); prices shown as "currently listed for". Without keys, Sell uses a category × condition estimate. |

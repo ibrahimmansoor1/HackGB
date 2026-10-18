@@ -83,8 +83,7 @@ def test_ebay_error_falls_back_to_estimate(monkeypatch):
     assert "Couldn't reach eBay (search failed (503)); using an estimate" in msgs
 
 
-def test_model_pricing_keeps_only_real_comps(monkeypatch, ebay_up):
-    monkeypatch.setattr(config, "USE_STUBS", False)
+def test_model_pricing_keeps_only_real_comps(monkeypatch, ebay_up, modal_mode):
 
     async def model(system, user):
         assert "Puffer Jacket M Black" in user
@@ -97,8 +96,7 @@ def test_model_pricing_keeps_only_real_comps(monkeypatch, ebay_up):
     assert body["suggested_price"]["low"] == 35 and len(body["listing_draft"]["title"]) == 80
 
 
-def test_model_failure_is_502(monkeypatch, ebay_up):
-    monkeypatch.setattr(config, "USE_STUBS", False)
+def test_model_failure_is_502(monkeypatch, ebay_up, modal_mode):
 
     async def model(system, user):
         return {"suggested_price": {"low": 90, "high": 10}}

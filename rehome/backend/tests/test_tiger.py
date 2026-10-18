@@ -128,6 +128,18 @@ def test_requests_and_matches(pg):
     pg.update_request_status(req_id, "closed")
     assert pg.get_match(req_id, item_id)["status"] == "accepted"
     assert pg.get_request(req_id)["status"] == "closed"
+    assert req_id not in [r["id"] for r, _ in pg.open_requests_near(_vec(3), top_k=50)]
+
+
+def test_open_requests_near(pg):
+    req_id = pg.new_request_id()
+    pg.insert_request({"id": req_id, "requester_id": "r", "raw_text": "lamp", "zip": "54311",
+                       "needs": ["lamp"], "inferred_context": [], "must_have": [],
+                       "nice_to_have": [], "size": None, "search_text": "lamp",
+                       "embedding": _vec(6), "status": "open", "created_at": pg.now()})
+    got = pg.open_requests_near(_vec(6), top_k=50)
+    assert got[0][0]["id"] == req_id and got[0][1] == pytest.approx(1.0)
+    assert got[0][0]["needs"] == ["lamp"]
 
 
 def test_listings(pg):
@@ -180,6 +192,15 @@ def test_events_feed_order_and_fields(pg):
     assert [e["message"] for e in got][:2] == ["one", "two"]
     assert got[0]["event_type"] == "item_parsed" and got[0]["created_at"] is not None
     assert pg.list_events(after=b["id"]) == []
+
+
+def test_agent_trace_columns(pg):
+    pg.insert_event({"agent": "concierge", "message": "← $15–23", "run_id": "run_t1",
+                     "tool": "get_price_quote", "duration_ms": 812,
+                     "data": {"low": 15, "high": 23}, "created_at": pg.now()})
+    pg.insert_event({"agent": "orchestrator", "message": "untraced", "created_at": pg.now()})
+    [e] = pg.list_events(run_id="run_t1")
+    assert (e["tool"], e["duration_ms"], e["data"]) == ("get_price_quote", 812, {"low": 15, "high": 23})
 
 
 def test_listing_nostr_url_roundtrip(pg):

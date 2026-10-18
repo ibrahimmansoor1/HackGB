@@ -15,8 +15,6 @@ REASON_PROMPT = """For each candidate item, write one reason (max 12 words) expl
 fits this request, or what it lacks. Return ONLY a JSON array of
 {"item_id": "...", "reason": "..."}."""
 
-# Stub embeddings score much lower than real ones.
-THRESHOLD = 0.2 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
 DRAFT_TTL = timedelta(hours=24)   # an unsold, undonated draft expires after this
 _listing_now: set[str] = set()   # items being published; guards double-clicks and matching
@@ -58,8 +56,8 @@ def items(status: str | None = None) -> list[Item]:
     return [_public(r) for r in db.list_items(status)]
 
 
-def events(after: int = 0) -> list[AgentEvent]:
-    return [AgentEvent.model_validate(e) for e in db.list_events(after)]
+def events(after: int = 0, run_id: str | None = None) -> list[AgentEvent]:
+    return [AgentEvent.model_validate(e) for e in db.list_events(after, run_id=run_id)]
 
 
 IMPACT_TOTALS = {"item_parsed": "items_parsed", "item_donated": "items_donated",
@@ -171,38 +169,83 @@ def _estimate(item: dict) -> PriceQuote:
         "comps": [], "listing_draft": pricing.listing_draft(item)})
 
 
-async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
-    """N1-N3: embed, insert as available, consume the draft."""
+async def _draft_to_item(draft_id: str, pickup_zip: str | None,
+                         donated: bool) -> tuple[ParsedItem, Item, list[float]]:
+    """Embed, claim the draft atomically, insert it as an available item."""
     row = _get_draft(draft_id)
     parsed = ParsedItem.model_validate(row["item"])
     vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
     if db.pop_draft(draft_id) is None:                         # a double-click got it first
         raise FlowError(404, f"Draft {draft_id} was already used.")
-    item_id = db.new_item_id()
     item = await store(parsed, row["note"], (pickup_zip or "").strip() or row["zip"],
-                       row["donor_id"], row["image_url"], item_id, vec)
-    return DonateOut(item_id=item.id, status=item.status,
-                     message=f"Thanks! Your {parsed.item} is now searchable.")
+                       row["donor_id"], row["image_url"], db.new_item_id(), vec,
+                       donated=donated)
+    return parsed, item, vec
 
 
-def is_draft_id(some_id: str) -> bool:
-    return some_id.startswith("drf_")
+async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
+    """N1-N3: embed, insert as available, consume the draft; then the
+    matchmaker offers it to open requests it could fill."""
+    parsed, item, vec = await _draft_to_item(draft_id, pickup_zip, donated=True)
+    waiting = await matchmake(item.model_dump(), vec)
+    msg = f"Thanks! Your {parsed.item} is now searchable."
+    if waiting:
+        msg += f" {len(waiting)} open request{'s' * (len(waiting) > 1)} nearby could use it."
+    return DonateOut(item_id=item.id, status=item.status, message=msg,
+                     waiting_requests=[w["request_id"] for w in waiting])
 
 
-async def list_draft(draft_id: str, price: float | None = None) -> ListItemOut:
-    """Sell side (owner: ibrahim): the donor chose to sell after seeing the quote.
-    The draft becomes an item and is listed on Nostr right away, at the donor's
-    price (else the category x condition default). It never counts as a donation.
-    If no relay accepts it (502), the item stays available, like /list."""
-    row = _get_draft(draft_id)
-    parsed = ParsedItem.model_validate(row["item"])
-    vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
-    if db.pop_draft(draft_id) is None:                         # a double-click got it first
-        raise FlowError(404, f"Draft {draft_id} was already used.")
-    item_id = db.new_item_id()
-    await store(parsed, row["note"], row["zip"], row["donor_id"], row["image_url"], item_id,
-                vec, for_sale=True)
-    return await list_item(item_id, price=price)
+async def post_draft(draft_id: str, price: float | None = None) -> ListItemOut:
+    """Sell path, step 2: the draft becomes an item and is listed on the
+    marketplace at `price` (heuristic if None). Unsold after 30 days, the
+    expiry rule moves it to the donation pool."""
+    if price is not None and price <= 0:
+        raise FlowError(422, "Price must be more than $0.")
+    _, item, _ = await _draft_to_item(draft_id, None, donated=False)
+    try:
+        return await list_item(item.id, price=price)
+    except FlowError as e:   # listing failed: it stays available, i.e. in the donation pool
+        raise FlowError(e.status_code, f"{e.detail} {item.id} is in the donation pool.") from e
+
+
+def draft_item(draft_id: str) -> dict:
+    """The parsed item of a live draft (404 FlowError otherwise)."""
+    return _get_draft(draft_id)["item"]
+
+
+async def local_demand(item: dict, vec: list[float] | None = None) -> list[dict]:
+    """Read-only matchmaker check: open requests this item could fill, best first."""
+    if vec is None:
+        vec = await llm.embed(_embed_text(item))
+    threshold = _threshold()
+    waiting = []
+    for req, score in db.open_requests_near(vec, top_k=5):
+        final = score
+        if config.USE_STUBS:     # same stub re-ranking as handle_request
+            final += stub_rules.stub_fit(req, item)
+        if final >= threshold:
+            waiting.append({"request_id": req["id"], "zip": req["zip"], "score": round(score, 3),
+                            "needs": req.get("needs") or []})
+    return waiting
+
+
+async def matchmake(item: dict, vec: list[float]) -> list[dict]:
+    """Matchmaker agent: open requests this new item could fill, best first.
+    Each one gets the item as a suggested match it can claim with /accept."""
+    waiting = await local_demand(item, vec)
+    for w in waiting:
+        db.insert_matches([{"request_id": w["request_id"], "item_id": item["id"],
+                            "score": w["score"], "rank": 0, "status": "suggested",
+                            "reason": "New donation that fits your request"}])
+        if db.get_request(w["request_id"])["status"] == "open":
+            db.update_request_status(w["request_id"], "matched")
+        emit("matchmaker", f"{item['id']} may fit {w['request_id']} "
+             f"({', '.join(w['needs']) or 'open request'}, zip {w['zip']})",
+             item_id=item["id"], request_id=w["request_id"])
+    if not waiting:
+        emit("matchmaker", f"No open requests fit {item['id']} yet; it stays searchable",
+             item_id=item["id"])
+    return waiting
 
 
 async def donate(note: str | None, zip_code: str, donor_id: str,
@@ -215,18 +258,20 @@ async def donate(note: str | None, zip_code: str, donor_id: str,
 
 async def store(parsed: ParsedItem, note: str | None, zip_code: str,
                 donor_id: str, image_url: str | None, item_id: str,
-                vec: list[float] | None = None, for_sale: bool = False) -> Item:
+                vec: list[float] | None = None, donated: bool = True) -> Item:
+    """Insert as available. `donated=False` (about to be listed for sale)
+    skips the item_donated impact count."""
     if vec is None:
         vec = await llm.embed(_embed_text(parsed.model_dump()))
     row = {**parsed.model_dump(), "id": item_id, "donor_id": donor_id, "note": note,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}
     db.insert_item(row)
-    if for_sale:   # about to be listed; not a donation (impact stats)
-        emit("orchestrator", f"Saved {item_id} to sell", item_id=item_id)
-    else:
+    if donated:
         emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
              event_type="item_donated", category=parsed.category)
+    else:
+        emit("orchestrator", f"Saved {item_id} to list for sale", item_id=item_id)
     return _public(row)
 
 
@@ -236,7 +281,12 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     emit("orchestrator", f"New request from {zip_code}", request_id=req_id,
          event_type="request_made")
 
-    query = await requester.parse_request(text, zip_code)
+    try:
+        query = await requester.parse_request(text, zip_code)
+    except Exception as e:   # model down or unusable reply: keyword rules keep the demo going
+        emit("requester", f"Model reply unusable ({type(e).__name__}); using keyword rules",
+             request_id=req_id)
+        query = requester._stub(text, zip_code)
     ctx = ", ".join(query.inferred_context) or "no extra context"
     need = ", ".join(query.must_have) or "nothing specific"
     emit("requester", f"Inferred {ctx}; needs {need}", request_id=req_id)
@@ -251,14 +301,15 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
 
     # threshold + must_have boost
     ranked = []
+    threshold = _threshold()
     for row, score in candidates:
-        if score < THRESHOLD:
+        if score < threshold:
             continue
         hits = sum(stub_rules.satisfies(row["attributes"], a) for a in query.must_have)
         final = score + 0.05 * hits
         if config.USE_STUBS:
             final += stub_rules.stub_fit(query.model_dump(), row)
-            if final < THRESHOLD:
+            if final < threshold:
                 continue
         ranked.append((row, score, final))
     ranked.sort(key=lambda x: x[2], reverse=True)
@@ -316,6 +367,12 @@ async def accept_match(request_id: str, item_id: str) -> AcceptOut:
 
 def _title(row: dict) -> str:
     return f"{row['brand']} {row['item']}" if row.get("brand") else row["item"]
+
+
+def _threshold() -> float:
+    """Hashed stub embeddings score much lower than real ones, so they get their
+    own cutoff; that holds even when the Modal text model is configured."""
+    return 0.2 if llm.stub_embeddings() else config.MATCH_THRESHOLD
 
 
 def _still_available(item_id: str) -> bool:
@@ -400,8 +457,7 @@ async def list_item(item_id: str, platform: str = "nostr",
             price = marketplace.suggest_price(row)
             how = f"{row['category']}, {row['condition']}"
         else:
-            price = round(float(price), 2)
-            how = "seller's price"
+            price, how = round(float(price), 2), "from the price quote"
         emit("orchestrator", f"Priced {item_id} at ${price:g} ({how})", item_id=item_id)
         try:
             result = await channel.publish(row, price)

@@ -165,6 +165,19 @@ def insert_request(row: dict) -> dict:
     return row
 
 
+def open_requests_near(query_vec: list[float], top_k: int = 5) -> list[tuple[dict, float]]:
+    """pgvector search over requests that aren't closed (the matchmaker's view)."""
+    rows = _all(f"""SELECT {', '.join(REQUEST_COLS)}, 1 - (embedding <=> %(q)s::vector) AS score
+                    FROM requests WHERE status <> 'closed' AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %(q)s::vector LIMIT %(k)s""",
+                {"q": _vec(query_vec), "k": top_k})
+    out = []
+    for r in rows:
+        score = r.pop("score")
+        out.append((r, 0.0 if score is None or math.isnan(score) else float(score)))
+    return out
+
+
 def get_request(request_id: str) -> dict | None:
     return _one(f"SELECT {', '.join(REQUEST_COLS)} FROM requests WHERE id = %s", (request_id,))
 
@@ -223,11 +236,19 @@ def update_listing(listing_id: str, **fields) -> None:
 
 
 # ---- events (hypertable) ---------------------------------------------------
+_EVENT_SELECT = """id, agent, event_type, item_id, request_id, category, message,
+                   run_id, tool, duration_ms, data, time AS created_at"""
+
+
 def insert_event(row: dict) -> dict:
-    out = _one("""INSERT INTO events (time, agent, event_type, item_id, request_id, category, message)
-                  VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+    data = row.get("data")
+    out = _one("""INSERT INTO events (time, agent, event_type, item_id, request_id, category,
+                                      message, run_id, tool, duration_ms, data)
+                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                (row.get("created_at") or now(), row["agent"], row.get("event_type"),
-                row.get("item_id"), row.get("request_id"), row.get("category"), row["message"]))
+                row.get("item_id"), row.get("request_id"), row.get("category"), row["message"],
+                row.get("run_id"), row.get("tool"), row.get("duration_ms"),
+                Jsonb(data) if data is not None else None))
     row["id"] = out["id"]
     return row
 
@@ -237,7 +258,9 @@ def impact_rows() -> list[dict]:
     return _all("SELECT bucket, event_type, category, n FROM impact_hourly")
 
 
-def list_events(after: int = 0, limit: int = 50) -> list[dict]:
-    return _all("""SELECT id, agent, event_type, item_id, request_id, category, message,
-                          time AS created_at
-                   FROM events WHERE id > %s ORDER BY id LIMIT %s""", (after, limit))
+def list_events(after: int = 0, limit: int = 50, run_id: str | None = None) -> list[dict]:
+    if run_id is None:
+        return _all(f"SELECT {_EVENT_SELECT} FROM events WHERE id > %s ORDER BY id LIMIT %s",
+                    (after, limit))
+    return _all(f"""SELECT {_EVENT_SELECT} FROM events WHERE run_id = %s AND id > %s
+                    ORDER BY id LIMIT %s""", (run_id, after, limit))

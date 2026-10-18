@@ -1,5 +1,7 @@
-"""Parser agent: photo(s) and/or donor text -> ParsedItem (D2 -> D3), on Gemini.
-Pure function: never touches the DB. Prompt spec in docs/05-agents.md."""
+"""Parser agent: photo(s) and/or donor text -> ParsedItem (D2 -> D3).
+Gemini when GEMINI_API_KEY is set, else the Modal model (GLM-5.3-Flash reads
+images), else keyword stubs. Pure function: never touches the DB.
+Prompt spec in docs/05-agents.md."""
 from pydantic import ValidationError
 from app.agents import stub_rules
 from app.core import config, llm
@@ -16,6 +18,7 @@ color, size, condition, season, attributes, summary.
   about, chosen from this vocabulary when possible: {", ".join(stub_rules.ATTRIBUTE_VOCAB)}.
 - condition: one of new, like new, good, fair. Judge from the photo; prefer
   the donor's text if it says.
+- color: the main color; "assorted" if you can't tell.
 - season: winter, summer, all, or null.
 - summary: one sentence a buyer would read.
 No prose, no markdown fences."""
@@ -23,14 +26,18 @@ No prose, no markdown fences."""
 
 async def parse_item(text: str | None,
                      images: list[tuple[bytes, str]] | None = None) -> ParsedItem:
-    """`images` is a list of (bytes, mime). No GEMINI_API_KEY -> stub parser."""
+    """`images` is a list of (bytes, mime)."""
     images = [(b, m) for b, m in images or [] if b]
-    if not config.GEMINI_API_KEY:
+    if config.GEMINI_API_KEY:
+        call = llm.gemini_json
+    elif not config.USE_STUBS:
+        call = llm.complete_json      # Modal vision model until there's a Gemini key
+    else:
         return _stub(text, bool(images))
     user = f"Donor text: {text or '(none)'}"
     for attempt in range(2):  # one retry on bad JSON / schema mismatch
         try:
-            raw = await llm.gemini_json(SYSTEM_PROMPT, user, images)
+            raw = await call(SYSTEM_PROMPT, user, images)
             return ParsedItem.model_validate(raw)
         except (ValidationError, ValueError):
             if attempt == 1:

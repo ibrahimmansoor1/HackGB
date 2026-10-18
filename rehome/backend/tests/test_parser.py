@@ -50,6 +50,29 @@ def test_two_bad_replies_raise(gemini):
         asyncio.run(parser.parse_item("coat"))
 
 
+def test_no_gemini_key_but_modal_uses_the_modal_vision_model(monkeypatch):
+    monkeypatch.setattr(config, "USE_STUBS", False)
+    calls = []
+
+    async def modal(system, user, images):
+        calls.append(images)
+        return GOOD
+
+    async def boom(*a):
+        raise AssertionError("no Gemini key: Gemini must not be called")
+    monkeypatch.setattr(llm, "complete_json", modal)
+    monkeypatch.setattr(llm, "gemini_json", boom)
+    out = asyncio.run(parser.parse_item("coat", [(b"img", "image/jpeg")]))
+    assert out.brand == "Columbia" and calls == [[(b"img", "image/jpeg")]]
+
+
+def test_modal_request_asks_for_low_reasoning(monkeypatch):
+    monkeypatch.setattr(config, "MODAL_REASONING_EFFORT", "low")
+    assert llm.modal_extra_body() == {"chat_template_kwargs": {"reasoning_effort": "low"}}
+    monkeypatch.setattr(config, "MODAL_REASONING_EFFORT", "")
+    assert llm.modal_extra_body() == {}
+
+
 def test_no_key_uses_stub_and_brand_is_null(monkeypatch):
     async def boom(*a):
         raise AssertionError("no key: Gemini must not be called")

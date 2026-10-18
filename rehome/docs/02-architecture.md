@@ -7,7 +7,9 @@
 | Donor app | `frontend/src/routes/(app)/donate` | Upload photo/text → see parsed item → choose **Sell** or **Donate** | – |
 | Requester app | `frontend/src/routes/(app)/request` | Submit need + zip, show matches, claim one | – |
 | Impact dashboard | `frontend/src/routes/(app)/feed` (+ `lib/ActivityFeed.svelte`, `lib/ImpactStats.svelte`) | Live stats from `/api/impact` + agent activity feed | – |
-| Orchestrator | `backend/app/agents/orchestrator.py` | **Deterministic Python**, not an LLM loop. Routes work, embeds, reads/writes DB, ranks, emits every step as an event. The donor's UI choice decides sell vs donate, so no LLM routing. | – |
+| **Concierge agent** | `backend/app/agents/concierge.py` | **LangGraph agent loop** on a Modal tool-calling model. Takes over after upload: prices the item, checks who nearby needs it, then lists or donates it, and tells the donor why. Rule policy when offline or if the model fails. | Modal |
+| Matchmaker agent | orchestrator (`matchmake`) | New donation → open requests it fits (pgvector) → suggested matches + feed events | Tiger Data |
+| Orchestrator | `backend/app/agents/orchestrator.py` | **Deterministic Python** service layer: routes work, embeds, reads/writes DB, ranks, emits every step as an event. The concierge's tools call it; on the manual path the donor's UI choice decides sell vs donate. | – |
 | Input parser agent | `backend/app/agents/parser.py` | Photo/text → `ParsedItem` via **Gemini API** (vision) | Gemini (MLH) |
 | Pricing agent | `backend/app/agents/pricing.py` *(create)* | `ParsedItem` + eBay comps → price range + listing draft. LLM on **Modal**; comps from **eBay Browse API** | Modal |
 | Donation step | orchestrator function, **not an LLM** | Modal embedding → DB insert | Modal |
@@ -68,6 +70,27 @@ flowchart TD
 
 1. **N2** Orchestrator embeds `summary + attributes + item` on Modal.
 2. **N3** Inserts an `items` row, `status = available`. Now searchable.
+3. **N4** The matchmaker agent offers it to open requests it fits (suggested matches).
+
+**Let Rehome handle it** (`POST /api/items/{draft_id}/handle`): the agentic path
+
+The **concierge agent** (LangGraph, Modal tool-calling model) does the donor's remaining work:
+
+1. Calls `get_price_quote` (pricing agent + eBay comps, the Sell steps above) and `check_local_demand` (matchmaker, read-only).
+2. Decides: donate if someone nearby is waiting or it's worth under $15, otherwise sell (the donor can force either).
+3. Acts: `list_for_sale(price)` posts it on Shopstr (unsold 30 days → donation pool), or `donate_item` runs the Donate steps above.
+4. Tells the donor what it did and why. Every tool call is an event, so the feed shows the agents working.
+
+```mermaid
+flowchart LR
+  D[Donor: photo + 'just want it gone'] --> P[Parser agent · Gemini]
+  P --> C{{Concierge agent<br/>LangGraph · Modal}}
+  C -- get_price_quote --> PR[Pricing agent · Modal<br/>+ eBay comps]
+  C -- check_local_demand --> M[Matchmaker agent<br/>pgvector on Tiger]
+  C -- list_for_sale --> S[Shopstr listing<br/>30 days → donation pool]
+  C -- donate_item --> N[Donation + matchmaker<br/>offers it to waiting requests]
+  C --> R[Donor: what I did and why]
+```
 
 ### Requester path
 
@@ -108,6 +131,6 @@ flowchart LR
 - Dry run by default: without `NOSTR_NSEC`, or with `MARKETPLACE_DRY_RUN=true`, events are signed with a throwaway key and not sent.
 - Live mode with zero relays accepting → item stays `available`, error event, `502`.
 - Channels share one small interface (`Channel`: `publish`, `mark_sold`). Roadmap: Etsy, Shopify, eBay selling (needs developer approval), each as another `Channel`.
-- **Sell path → this channel (built, ibrahim):** after `/{draft_id}/sell`, the donor picks a price from the quote and calls `POST /api/items/{draft_id}/list` with `{"price": ...}`. The draft becomes an `items` row (not counted as a donation in impact) and is listed right away, so the 30-day rule can release it to the donation pool. `POST /api/items/{item_id}/list` still lists an existing available item; both accept an optional price (default: category × condition).
+- **Sell path → this channel (built):** after `/{draft_id}/sell`, `POST /api/items/{draft_id}/post` with an optional `{"price"}` turns the draft into an `items` row (not counted as donated in impact) and lists it right away; the concierge's `/handle` uses the same path. Unsold after 30 days, the expiry rule releases it to the donation pool. `POST /api/items/{item_id}/list` lists an existing available item (optional price).
 
 For the demo, `POST /api/admin/simulate-expiry` fast-forwards the 30 days.

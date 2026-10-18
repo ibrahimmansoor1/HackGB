@@ -27,7 +27,7 @@ One photo to sell or give something away; one sentence to find what you need. Ag
 ## What makes it technically interesting
 
 - **Multimodal input:** a vision model turns a photo (including clothing tags) into structured data.
-- **Specialized agents, deterministic orchestration:** parser, pricing, and requester agents are pure prompt → JSON functions; a plain Python orchestrator routes work and logs every step.
+- **Agents do the donor's chores:** a concierge agent (LangGraph on a Modal tool-calling model) takes over after the upload: it asks the pricing agent what the item is worth, asks the matchmaker who nearby needs it, then lists it on Shopstr or donates it and explains why. Specialist agents (parser on Gemini; pricing, requester, reasons on Modal) are pure prompt → JSON functions behind a deterministic orchestrator that owns the data and logs every step.
 - **Contextual matching:** the requester agent expands vague intent into concrete attributes from the same vocabulary the parser uses, so both sides line up in vector space (pgvector).
 - **Real price comps:** the pricing agent grounds its suggestion in live eBay listings.
 - **Time-series impact:** every agent step is an event in a Tiger Data hypertable; a continuous aggregate powers the live dashboard.

@@ -9,7 +9,9 @@ This file is the contract between frontend and backend. Change it here first.
 | GET | `/api/health` | Liveness + stub flags |
 | POST | `/api/items/parse` | Parse photo/text into a draft; offer sell or donate |
 | POST | `/api/items/{draft_id}/sell` | Price range, comps, listing draft |
-| POST | `/api/items/{draft_id}/donate` | Embed + insert; item becomes searchable |
+| POST | `/api/items/{draft_id}/donate` | Embed + insert; item becomes searchable; matchmaker offers it to open requests |
+| POST | `/api/items/{draft_id}/handle` | Concierge agent prices it, checks demand, then lists or donates it |
+| POST | `/api/items/{draft_id}/post` | List a draft on Shopstr at a price |
 | GET | `/api/items?status=` | List inventory |
 | POST | `/api/requests` | Need → ranked matches (nothing reserved) |
 | POST | `/api/matches/accept` | Claim a match; reserves the item |
@@ -100,9 +102,48 @@ The body is optional, and so is `pickup_zip`; it defaults to the draft's `zip`.
 
 **Response `201`:**
 ```json
-{ "item_id": "itm_0142", "status": "available", "message": "Thanks! Your puffer jacket is now searchable." }
+{ "item_id": "itm_0142", "status": "available",
+  "message": "Thanks! Your puffer jacket is now searchable. 1 open request nearby could use it.",
+  "waiting_requests": ["req_0031"] }
 ```
-The draft is consumed.
+The draft is consumed. The **matchmaker agent** then checks open (not `closed`) requests against the new item; each that fits gets it as a `suggested` match (claimable with `/api/matches/accept`), moves from `open` to `matched`, and is listed in `waiting_requests`.
+
+---
+
+## `POST /api/items/{draft_id}/handle` — let the agents handle it
+
+Hands the draft to the **concierge agent** (docs/05): it prices the item, checks local demand, then lists or donates it.
+
+**Request** (optional): `{ "preference": "auto" }`: `auto` (the agent decides), `sell`, or `donate`.
+
+**Response `200`:**
+```json
+{
+  "run_id": "run_3f9c2a1b7e",
+  "draft_id": "drf_0007",
+  "action": "donated",
+  "item_id": "itm_0142",
+  "summary": "I donated your puffer jacket because 1 person nearby is already looking for one and offered it to them.",
+  "brain": "modal",
+  "steps": ["get_price_quote", "check_local_demand", "donate_item"],
+  "price_quote": { "low": 15, "high": 23, "currency": "USD" },
+  "waiting_requests": ["req_0031"],
+  "listing": null
+}
+```
+`action` is `listed` (then `listing` is the Shopstr listing) or `donated`. `brain` is `modal` when the Modal model made every decision, `rules` when the offline rule policy did (no Modal, or the model failed and rules finished the job). The draft is consumed.
+
+**Errors:** `404` unknown, expired, or already-used draft · `422` bad `preference` · `502` the run couldn't list or donate (e.g. no relay accepted the listing).
+
+---
+
+## `POST /api/items/{draft_id}/post` — list a draft for sale
+
+**Request** (optional): `{ "price": 45 }`. Without a price, the category × condition heuristic is used.
+
+**Response `201`:** same as `POST /api/items/{id}/list` (`{item, listing}`). The draft becomes an item and is listed (`listed`); unsold after 30 days, the expiry rule puts it in the donation pool. Doesn't count as `item_donated`.
+
+**Errors:** `404` unknown, expired, or already-used draft · `422` price ≤ 0 · `502` no relay accepted it (the item stays `available`, i.e. in the donation pool).
 
 **Errors:** `404` unknown, expired, or already-used draft.
 
@@ -187,7 +228,7 @@ Exchange method is undecided; for now `handoff.method` is always `"pickup"` and 
 
 ## `GET /api/events?after=<id>` — activity feed
 
-Poll every ~1 s. Returns events with `id > after`, oldest first, max 50.
+Poll every ~1 s. Returns events with `id > after`, oldest first, max 50. Add `run_id=<run_…>` to get only one agent run's steps (the `run_id` comes back from `/handle`). Agent-run events also carry `run_id`, `tool`, `duration_ms`, and `data` (see docs/03); they're `null` elsewhere.
 
 **Response `200`:**
 ```json
@@ -236,14 +277,11 @@ Loads the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` i
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
 
-**Sell path:** after `POST /api/items/{draft_id}/sell`, list the draft directly with `POST /api/items/{draft_id}/list` (below). The same path takes an `items` id to list an existing available item.
+**Sell path:** drafts are listed with `POST /api/items/{draft_id}/post` (above). `/list` below lists an existing available item.
 
 ### `POST /api/items/{id}/list`
 
-`{id}` is an available item (`itm_…`) or a sell draft (`drf_…`). Optional body: `{ "price": 45 }` (USD, > 0), the seller's price, typically picked from the `/sell` quote; without it, the category × condition default is used.
-
-- **Draft:** the draft is consumed and becomes an item (event "Saved itm_x to sell", **not** `item_donated`), then listed. `404` unknown, expired, or already-used draft.
-- **Item:** must be `available`.
+`{id}` is an available item (`itm_…`). Optional body: `{ "price": 45 }` (USD, > 0); without it, the category × condition default is used.
 
 **Response `200`:**
 ```json

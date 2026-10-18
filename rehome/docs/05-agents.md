@@ -1,16 +1,57 @@
 # 05 · Agents
 
-Agents are **pure prompt → JSON functions**: no DB access, no side effects. Every agent must return **only JSON** matching its schema; the backend validates with Pydantic and retries once on a validation failure.
+Two kinds of agents:
 
-| Agent | Model | Provider |
-|---|---|---|
-| Input parser | vision LLM | **Gemini API** |
-| Pricing | text LLM | **Modal** |
-| Requester | text LLM | **Modal** |
-| Match reasons (inside orchestrator) | text LLM | **Modal** |
-| Embeddings | embedding model | **Modal** |
+- **The concierge** is a real agent loop (LangGraph): a tool-calling model decides which specialist to call, reads the results, and acts (lists or donates the item) on the donor's behalf.
+- **Specialists** are **pure prompt → JSON functions**: no DB access, no side effects. Each must return **only JSON** matching its schema; the backend validates with Pydantic and retries once on a validation failure. The concierge reaches them as tools, through the orchestrator.
 
-All model calls go through `backend/app/core/llm.py`. Pydantic versions of these schemas live in `backend/app/schemas.py`.
+| Agent | Kind | Model | Provider |
+|---|---|---|---|
+| **Concierge** | agent loop, tool calling | text LLM | **Modal** (`infra/modal_llm.py`) via LangGraph |
+| Input parser | specialist | vision LLM | **Gemini API** (Modal's GLM-5.3-Flash until a Gemini key is set) |
+| Pricing | specialist | text LLM | **Modal** |
+| Requester | specialist | text LLM | **Modal** |
+| Matchmaker | specialist (vector search + rules) | embeddings | **Modal** / Tiger pgvector |
+| Match reasons (inside orchestrator) | specialist | text LLM | **Modal** |
+| Embeddings | – | embedding model | **Modal** |
+
+All model calls go through `backend/app/core/llm.py`, except the concierge's, which uses LangChain's OpenAI-compatible client on the same Modal endpoint.
+
+---
+
+## Concierge agent (LangGraph + Modal)
+
+`backend/app/agents/concierge.py`, called by `POST /api/items/{draft_id}/handle`. Takes over the chores after the donor uploads an item.
+
+```mermaid
+flowchart LR
+  S((start)) --> C[concierge<br/>Modal, tool calling]
+  C -- tool calls --> T[tools]
+  T --> C
+  C -- final answer --> E((end))
+  T --- P[get_price_quote<br/>pricing agent + eBay]
+  T --- D[check_local_demand<br/>matchmaker]
+  T --- L[list_for_sale<br/>Shopstr, 30-day rule]
+  T --- N[donate_item<br/>donation + matchmaker]
+```
+
+**System prompt:**
+```
+You are Rehome's concierge. A donor uploaded an item and wants it gone
+without any more work. You do the work with your tools.
+1. Call get_price_quote and check_local_demand.
+2. Decide. Respect the donor's preference if it is "sell" or "donate". Otherwise:
+   donate if someone nearby is waiting for this kind of item, or if it is worth
+   under $15; else sell it.
+3. Call exactly one of list_for_sale (price within the quoted range) or donate_item.
+4. Reply to the donor in 2-3 plain sentences: what you did and why.
+```
+
+**Guardrails:** acts at most once per draft (a second list/donate call is refused); tool errors (e.g. price ≤ 0) go back to the model as the tool result so it can retry; recursion limit 12. If the model is unreachable, errors, or stops without acting, a **rule policy** finishes the run in the same graph (same decision rules as the prompt; list price = quote midpoint). Offline (no Modal) the rule policy is the brain from the start; `brain` in the response says which one decided.
+
+## Matchmaker agent
+
+After every donation (`/donate`, or the concierge's `donate_item`), embeds the item, searches requests that aren't `closed` (pgvector), applies the match threshold (plus stub re-ranking offline), and for each fit: inserts a `suggested` match, moves the request `open` → `matched`, and emits `matchmaker: itm_x may fit req_y (winter coat, zip 60601)`. The concierge's `check_local_demand` runs the same search read-only. Pydantic versions of these schemas live in `backend/app/schemas.py`.
 
 **Shared attribute vocabulary.** The parser's `attributes` and the requester's `must_have` / `nice_to_have` must use the same words (insulated, waterproof, water-resistant, hooded, wool, fleece, padded, breathable, cordless, …) so both sides line up in vector space. Keep the list in one constant and include it in both prompts.
 
@@ -115,7 +156,7 @@ No prose, no markdown fences.
 
 ## Orchestrator
 
-**Deterministic Python, not an LLM loop.** The donor's UI choice decides sell vs donate, so no LLM routing is needed. The only LLM call inside it writes match reasons.
+**Deterministic Python: the service layer under the agents.** It owns the DB and runs each flow step by step. On the manual path the donor's UI choice decides sell vs donate; on the "let Rehome handle it" path the **concierge agent** decides and calls these same orchestrator functions as tools. The only LLM call inside the orchestrator itself writes match reasons.
 
 **Parse:** `parse_item → store draft → emit item_parsed`
 **Sell:** `ebay.search(draft) → pricing agent (or fallback) → emit price_quoted`
