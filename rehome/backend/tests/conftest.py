@@ -1,8 +1,14 @@
-"""Every test starts with an empty in-memory DB (ids keep counting up)."""
-import pytest
+"""Every test starts with an empty in-memory DB (ids keep counting up).
+Tests never touch Tiger, even if .env sets DATABASE_URL; test_tiger.py
+covers the Postgres backend against TEST_DATABASE_URL."""
+import os
 
-from app.agents import orchestrator
-from app.core import db
+os.environ["DATABASE_URL"] = ""   # before app imports; load_dotenv won't override it
+
+import pytest  # noqa: E402
+
+from app.agents import orchestrator  # noqa: E402
+from app.core import db  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

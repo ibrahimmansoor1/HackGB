@@ -10,7 +10,11 @@ MODAL_ENDPOINT_URL = os.getenv("MODAL_ENDPOINT_URL", "")
 MODAL_API_KEY = os.getenv("MODAL_API_KEY", "")
 MODAL_VISION_MODEL = os.getenv("MODAL_VISION_MODEL", "")
 MODAL_EMBED_MODEL = os.getenv("MODAL_EMBED_MODEL", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Tiger Data (Postgres) connection string. Blank = in-memory stub DB.
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# Vector size of the embedding model; the items/requests columns are created
+# with it (scripts/init_db.py). Changing it means re-running init_db --reset.
+EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.70"))
 TOP_K = int(os.getenv("TOP_K", "3"))
 

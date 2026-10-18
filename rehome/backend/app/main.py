@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from app.agents import orchestrator
 from app.core import config
 from app.routers import admin, events, items, listings, pages, requests
 
@@ -25,4 +26,4 @@ app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "stubs": config.USE_STUBS}
+    return {"status": "ok", "stubs": config.USE_STUBS, "db": orchestrator.db_backend()}

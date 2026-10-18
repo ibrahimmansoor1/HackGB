@@ -1,56 +1,122 @@
 # 04 · API contract
 
-Base URL: `http://localhost:8000`. All responses are JSON. Errors use FastAPI's default `{"detail": "..."}` with a 4xx/5xx code.
+Base URL: `http://localhost:8000` locally; the deployed backend (Vultr or DigitalOcean) in production. All responses are JSON. Errors use FastAPI's default `{"detail": "..."}` with a 4xx/5xx code.
 
 This file is the contract between frontend and backend. Change it here first.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Liveness + stub flags |
+| POST | `/api/items/parse` | Parse photo/text into a draft; offer sell or donate |
+| POST | `/api/items/{draft_id}/sell` | Price range, comps, listing draft |
+| POST | `/api/items/{draft_id}/donate` | Embed + insert; item becomes searchable |
+| GET | `/api/items?status=` | List inventory |
+| POST | `/api/requests` | Need → ranked matches (nothing reserved) |
+| POST | `/api/matches/accept` | Claim a match; reserves the item |
+| GET | `/api/events?after=<id>` | Activity feed polling |
+| GET | `/api/impact` | Stats from the continuous aggregate |
+| POST | `/api/admin/seed` | Demo inventory |
 
 ---
 
 ## `GET /api/health`
 
 ```json
-{ "status": "ok" }
+{ "status": "ok", "stubs": true, "db": "memory" }
 ```
+`db` is `"tiger"` when `DATABASE_URL` is set, else `"memory"`.
 
 ---
 
-## `POST /api/items` — donate an item (D1 → D4)
+## `POST /api/items/parse` — parse a donation (D1 → D4)
 
 **Request:** `multipart/form-data`
 
 | Field | Type | Required |
 |---|---|---|
-| image | file (jpg/png/webp, ≤ 10 MB) | one of image or note |
-| note | string | one of image or note |
+| images | file(s), jpg/png/webp, ≤ 10 MB each | one of images or text |
+| text | string | one of images or text |
 | zip | string | yes |
 | donor_id | string | no (defaults to `demo_donor`) |
 
 **Response `201`:**
 ```json
 {
-  "id": "itm_0142",
-  "category": "outerwear",
-  "item": "puffer jacket",
-  "color": "black",
-  "size": "M",
-  "condition": "like new",
-  "season": "winter",
-  "attributes": ["insulated", "hooded", "water-resistant"],
-  "summary": "Black hooded puffer jacket, size M, like new.",
-  "image_url": "http://localhost:8000/static/uploads/itm_0142.jpg",
-  "status": "available",
-  "created_at": "2026-10-18T14:02:00Z"
+  "draft_id": "drf_0007",
+  "item": {
+    "category": "outerwear",
+    "item": "puffer jacket",
+    "brand": "Columbia",
+    "color": "black",
+    "size": "M",
+    "condition": "like new",
+    "season": "winter",
+    "attributes": ["insulated", "hooded", "water-resistant"],
+    "summary": "Black hooded Columbia puffer jacket, size M, like new."
+  },
+  "image_url": "http://localhost:8000/static/uploads/drf_0007.jpg",
+  "options": ["sell", "donate"]
 }
 ```
-(`embedding` is never returned to the frontend.) `image_url` is absolute, built from `PUBLIC_BASE_URL`, so the frontend uses it as is; it is `null` when no photo was sent.
+Nothing is written to `items` yet.
 
-**Errors:** `400` neither image nor note (a blank note counts as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip`.
+**Errors:** `400` neither images nor text (blank text counts as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip`.
+
+---
+
+## `POST /api/items/{draft_id}/sell` — price it
+
+No request body.
+
+**Response `200`:**
+```json
+{
+  "draft_id": "drf_0007",
+  "suggested_price": { "low": 35, "high": 55, "currency": "USD" },
+  "comps": [
+    { "title": "Columbia Men's Puffer Jacket M Black", "price": 49.99,
+      "condition": "Pre-owned", "source": "ebay", "url": "https://www.ebay.com/itm/..." }
+  ],
+  "listing_draft": {
+    "title": "Columbia Black Hooded Puffer Jacket, Men's M, Like New",
+    "description": "Warm insulated puffer with hood..."
+  },
+  "basis": "active listings"
+}
+```
+`basis` is `"active listings"` when comps came from the eBay Browse API (UI labels prices "currently listed for"), or `"estimate"` when eBay was unavailable and the category × condition heuristic was used (`comps: []`).
+
+**Errors:** `404` unknown or expired draft · `502` pricing model failed.
+
+---
+
+## `POST /api/items/{draft_id}/donate` — donate it
+
+**Request:** `application/json`
+```json
+{ "pickup_zip": "54311" }
+```
+`pickup_zip` is optional; defaults to the draft's `zip`.
+
+**Response `201`:**
+```json
+{ "item_id": "itm_0142", "status": "available", "message": "Thanks! Your puffer jacket is now searchable." }
+```
+The draft is consumed.
+
+**Errors:** `404` unknown or already-used draft.
+
+---
+
+## `POST /api/items` — one-step donate *(legacy shortcut)*
+
+Same multipart fields as `/parse` (single `image` + `note`), parses and donates in one call, returns the full `Item`. Kept so existing tests and the scaffold frontend keep working; **remove once the frontend uses `/parse` + `/donate`.**
 
 ---
 
 ## `GET /api/items?status=available` — list inventory
 
-**Response `200`:** `{ "items": [ Item, ... ] }` (same shape as above). `status` is optional (omit for all items); any value other than `available`, `listed`, `reserved`, `donated` is a `422`.
+**Response `200`:** `{ "items": [ Item, ... ] }`. `Item` = `ParsedItem` fields + `id`, `donor_id`, `note`, `zip`, `image_url`, `status`, `created_at` (`embedding` is never returned). `status` is optional; any value other than `available`, `listed`, `reserved`, `donated` is a `422`.
 
 ---
 
@@ -59,7 +125,7 @@ This file is the contract between frontend and backend. Change it here first.
 **Request:** `application/json`
 ```json
 {
-  "text": "need a warm coat, moving to Chicago in December",
+  "text": "snow clothes, moving to Chicago in December",
   "zip": "60601",
   "requester_id": "demo_requester"
 }
@@ -71,16 +137,17 @@ This file is the contract between frontend and backend. Change it here first.
   "request_id": "req_0031",
   "status": "matched",
   "query": {
-    "need": "winter coat",
+    "needs": ["winter coat", "snow pants", "boots"],
     "inferred_context": ["sub-freezing winters", "snow"],
     "must_have": ["insulated", "water-resistant"],
     "nice_to_have": ["hooded"],
     "size": null,
-    "search_text": "insulated water-resistant hooded winter coat"
+    "search_text": "insulated water-resistant winter coat snow pants boots"
   },
   "matches": [
     {
       "item_id": "itm_0142",
+      "title": "puffer jacket",
       "rank": 1,
       "score": 0.89,
       "reason": "Insulated and water-resistant, built for Chicago winters",
@@ -91,7 +158,30 @@ This file is the contract between frontend and backend. Change it here first.
 ```
 If nothing clears the threshold: `"status": "open"`, `"matches": []`.
 
-`score` is the raw similarity (0–1); `rank` is the order after re-ranking (docs/05), so rank 1 can have a lower `score` than rank 2. The rank-1 item becomes `reserved`.
+`score` is raw similarity (0–1); `rank` is the order after re-ranking (docs/05), so rank 1 can have a lower `score` than rank 2. `title` = the item's `item` field (brand prefixed when known). **Nothing is reserved here**; the requester claims with `/api/matches/accept`.
+
+---
+
+## `POST /api/matches/accept` — claim a match
+
+**Request:**
+```json
+{ "request_id": "req_0031", "item_id": "itm_0142" }
+```
+
+**Response `200`:**
+```json
+{
+  "match_id": "mat_0088",
+  "item_id": "itm_0142",
+  "status": "reserved",
+  "donor_notified": true,
+  "handoff": { "method": "pickup", "zip": "54311", "message": "Reserved. The donor has been notified; pickup in 54311." }
+}
+```
+Exchange method is undecided; for now `handoff.method` is always `"pickup"` and notification is an event only. The request becomes `closed`.
+
+**Errors:** `404` unknown request, or the item wasn't one of its matches · `409` item no longer `available`.
 
 ---
 
@@ -103,25 +193,50 @@ Poll every ~1 s. Returns events with `id > after`, oldest first, max 50.
 ```json
 {
   "events": [
-    { "id": 17, "agent": "parser", "message": "Identified black puffer jacket, size M",
-      "item_id": "itm_0142", "request_id": null, "created_at": "2026-10-18T14:02:01Z" }
+    { "id": 17, "agent": "parser", "event_type": "item_parsed", "category": "outerwear",
+      "message": "Identified black Columbia puffer jacket, size M",
+      "item_id": null, "request_id": null, "created_at": "2026-10-18T14:02:01Z" }
   ]
 }
 ```
 
 ---
 
-## Stretch
+## `GET /api/impact` — dashboard stats
+
+Reads `impact_hourly` (continuous aggregate).
+
+**Response `200`:**
+```json
+{
+  "totals": { "items_parsed": 42, "items_donated": 31, "prices_quoted": 9,
+              "requests_made": 27, "matches_made": 24, "matches_accepted": 15 },
+  "by_category": [ { "category": "outerwear", "items_donated": 12, "matches_accepted": 7 } ],
+  "hourly": [ { "bucket": "2026-10-18T13:00:00Z", "event_type": "item_donated", "n": 6 } ]
+}
+```
+`totals` keys are the `event_type` values, pluralized. `hourly` covers the last 24 h.
+
+---
+
+## `POST /api/admin/seed`
+
+Loads the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` if already loaded (no duplicates).
+
+---
+
+## Stretch: marketplace (Nostr / Shopstr)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/items/{id}/list` | Price the item, post it as a Nostr classified listing (shows on Shopstr), set `listed` |
+| `POST` | `/api/items/{id}/list` | Price an `items` row, post it as a Nostr classified listing (shows on Shopstr), set `listed` |
 | `POST` | `/api/admin/simulate-expiry` | Treat all active listings as 30 days old; close them on Nostr; item → `available` (donation pool) |
 | `GET` | `/api/listings?status=active` | List marketplace listings (`status` optional: `active` or `expired`; anything else is `422`) |
 | `POST` | `/api/admin/reset` | Start a rehearsal over without restarting: closes active listings (like simulate-expiry), then clears items, requests, matches, and listings; ids restart at `0001`. Events are kept. Returns `{"reset": true, "closed_listings": ["itm_0001", ...]}`; `409` while an item is being listed |
-| `POST` | `/api/admin/seed` | Load the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` if it was already loaded (no duplicates) |
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
+
+**Open (owner: ibrahim):** how a sell draft reaches `/list` (see docs/02).
 
 ### `POST /api/items/{id}/list`
 
@@ -147,20 +262,16 @@ No request body.
   }
 }
 ```
-- `external_id` is the Nostr event id (hex). `url` opens the listing on Shopstr (an `naddr` link, so it survives republishing). In a dry run the URL is well-formed but nothing was published, so it won't resolve; `dry_run` is `true` and `relays_accepted` is `[]`.
+- `external_id` is the Nostr event id (hex). `url` opens the listing on Shopstr (an `naddr` link, so it survives republishing). In a dry run the URL is well-formed but nothing was published; `dry_run` is `true` and `relays_accepted` is `[]`.
 - `price` comes from a per-category default × condition multiplier (whole dollars, min $1).
 
 **Errors:** `404` item not found · `409` item is not `available` (already listed, reserved, donated, or being listed) · `502` live mode and no relay accepted the event (or `NOSTR_NSEC` is invalid); the item stays `available`.
 
 ### `POST /api/admin/simulate-expiry`
 
-No request body. Every `active` listing becomes `expired`; each item still `listed` is republished on Nostr with `status=sold` (closing the public listing) and set back to `available`.
+No request body. Every `active` listing becomes `expired`; each item still `listed` is republished on Nostr with `status=sold` and set back to `available`.
 
-**Response `200`:**
-```json
-{ "expired": ["itm_0142", "itm_0143"] }
-```
-`expired` is `[]` when nothing was listed.
+**Response `200`:** `{ "expired": ["itm_0142", "itm_0143"] }` (`[]` when nothing was listed).
 
 ### `GET /api/listings`
 

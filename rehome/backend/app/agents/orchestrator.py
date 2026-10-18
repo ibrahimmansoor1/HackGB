@@ -50,6 +50,11 @@ def events(after: int = 0) -> list[AgentEvent]:
     return [AgentEvent.model_validate(e) for e in db.list_events(after)]
 
 
+def db_backend() -> str:
+    """`tiger` or `memory`, for /api/health."""
+    return db.BACKEND
+
+
 # ---- donor path: D1 -> D4 --------------------------------------------------
 async def donate(note: str | None, zip_code: str, donor_id: str,
                  image_bytes: bytes | None, image_mime: str,
@@ -57,7 +62,8 @@ async def donate(note: str | None, zip_code: str, donor_id: str,
     emit("orchestrator", "New donation received", item_id=item_id)
     parsed = await parser.parse_item(note, image_bytes, image_mime)
     emit("parser", f"Identified {parsed.color} {parsed.item}"
-         + (f", size {parsed.size}" if parsed.size else ""), item_id=item_id)
+         + (f", size {parsed.size}" if parsed.size else ""), item_id=item_id,
+         event_type="item_parsed", category=parsed.category)
     return await store(parsed, note, zip_code, donor_id, image_url, item_id)
 
 
@@ -68,14 +74,16 @@ async def store(parsed: ParsedItem, note: str | None, zip_code: str,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}
     db.insert_item(row)
-    emit("orchestrator", f"Saved {item_id} as available", item_id=item_id)
+    emit("orchestrator", f"Saved {item_id} as available", item_id=item_id,
+         event_type="item_donated", category=parsed.category)
     return _public(row)
 
 
 # ---- requester path: R1 -> R6 ----------------------------------------------
 async def handle_request(text: str, zip_code: str, requester_id: str) -> RequestOut:
     req_id = db.new_request_id()
-    emit("orchestrator", f"New request from {zip_code}", request_id=req_id)
+    emit("orchestrator", f"New request from {zip_code}", request_id=req_id,
+         event_type="request_made")
 
     query = await requester.parse_request(text, zip_code)
     ctx = ", ".join(query.inferred_context) or "no extra context"
@@ -109,7 +117,7 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     # The reasons call can take seconds with a real model; drop anything that
     # got listed or reserved meanwhile so we never reserve an unavailable item.
     ranked = [(row, score, final) for row, score, final in ranked
-              if row["status"] == "available" and row["id"] not in _listing_now]
+              if _still_available(row["id"])]
     matches = [Match(item_id=row["id"], rank=i + 1, score=round(score, 3),
                      reason=reasons.get(row["id"], "Similar to what you asked for"),
                      item=_public(row))
@@ -125,11 +133,18 @@ async def handle_request(text: str, zip_code: str, requester_id: str) -> Request
     if matches:
         db.update_item_status(matches[0].item_id, "reserved")
         emit("orchestrator", f"Matched {matches[0].item_id} ({matches[0].score}) and reserved it",
-             request_id=req_id, item_id=matches[0].item_id)
+             request_id=req_id, item_id=matches[0].item_id,
+             event_type="match_made", category=matches[0].item.category)
     else:
         emit("orchestrator", "No good match yet; request left open", request_id=req_id)
 
     return RequestOut(request_id=req_id, status=status, query=query, matches=matches)
+
+
+def _still_available(item_id: str) -> bool:
+    """Fresh read: search rows are snapshots once the DB is Postgres."""
+    row = db.get_item(item_id)
+    return row is not None and row["status"] == "available" and item_id not in _listing_now
 
 
 async def _reasons(query, rows: list[dict]) -> dict[str, str]:
@@ -156,6 +171,10 @@ _seeded: list[str] = []
 async def seed_demo() -> int:
     """Load SEED_ITEMS once (pre-parsed, no model call). Calling it again is a
     no-op so a double-click doesn't duplicate the inventory."""
+    if not _seeded:
+        # Tiger keeps data across restarts; don't seed twice.
+        _seeded.extend(r["id"] for r in db.list_items()
+                       if "/static/seed/" in (r.get("image_url") or ""))
     if _seeded:
         emit("orchestrator", f"Demo inventory already loaded ({len(_seeded)} items)")
         return 0

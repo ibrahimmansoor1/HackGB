@@ -1,11 +1,13 @@
 """Database access. ONLY the orchestrator and events logger import this.
 
-In-memory stub for now so everyone can build in parallel. The DB owner
-replaces these functions with the sponsor database; keep the signatures.
+With DATABASE_URL set, every function below is replaced by its Tiger Data
+version in core/db_pg.py (same signatures). Without it, this in-memory stub
+runs, so the demo and tests work offline.
 """
 from datetime import datetime, timezone
 import itertools
 import numpy as np
+from app.core import config
 
 _items: dict[str, dict] = {}
 _requests: dict[str, dict] = {}
@@ -111,3 +113,8 @@ def insert_event(row: dict) -> dict:
 
 def list_events(after: int = 0, limit: int = 50) -> list[dict]:
     return [e for e in _events if e["id"] > after][:limit]
+
+
+BACKEND = "tiger" if config.DATABASE_URL else "memory"
+if config.DATABASE_URL:
+    from app.core.db_pg import *  # noqa: E402,F401,F403  (overrides the stubs above)
