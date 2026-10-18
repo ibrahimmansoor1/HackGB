@@ -93,8 +93,9 @@ def test_parse_and_donate_events():
         ("orchestrator", None, "New item received"),
         ("parser", "item_parsed", "Identified black puffer jacket, size M"),
         ("orchestrator", "item_donated", f"Saved {item_id} as available"),
+        ("matchmaker", None, f"No open requests fit {item_id} yet; it stays searchable"),
     ]
-    assert events[-1]["category"] == "outerwear" and events[-1]["item_id"] == item_id
+    assert events[2]["category"] == "outerwear" and events[2]["item_id"] == item_id
 
 
 def test_parser_failure_is_502(monkeypatch):

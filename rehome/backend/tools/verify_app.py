@@ -62,8 +62,8 @@ with donate_tab:
             files = [("images", (p.name, p.getvalue(), p.type)) for p in photos or []]
             ss.draft = call("POST", "/api/items/parse", data={"zip": zip_code, "text": text},
                             files=files or None)
-            ss.pop("quote", None)
-            ss.pop("donated", None)
+            for key in ("quote", "donated", "handled"):
+                ss.pop(key, None)
 
     draft = ss.get("draft")
     if draft:
@@ -72,6 +72,22 @@ with donate_tab:
         if draft.get("image_url"):
             left.image(draft["image_url"], width=220)
         right.json(draft["item"])
+        st.markdown("**Let the agents handle it** (concierge agent, LangGraph)")
+        pref_col, go_col = st.columns([2, 1])
+        pref = pref_col.radio("Donor preference", ["auto", "sell", "donate"], horizontal=True)
+        if go_col.button("Hand it to the concierge", type="primary"):
+            ss.handled = call("POST", f"/api/items/{draft['draft_id']}/handle",
+                              json={"preference": pref})
+        if ss.get("handled"):
+            h = ss.handled
+            st.success(h["summary"])
+            st.write(f"**{h['action']}** `{h['item_id']}` · decided by **{h['brain']}** · "
+                     f"tools: {' → '.join(h['steps'])}")
+            if h["waiting_requests"]:
+                st.write(f"Offered to: {', '.join(h['waiting_requests'])}")
+            if h["listing"]:
+                st.write(f"Listing: ${h['listing']['price']:g} · {h['listing']['url']}")
+        st.markdown("**Or do it by hand**")
         sell, donate = st.columns(2)
         if sell.button("Sell: get a price"):
             ss.quote = call("POST", f"/api/items/{draft['draft_id']}/sell")

@@ -72,9 +72,15 @@ async def gemini_json(system: str, user_text: str,
     return json.loads(_strip_fences(text))
 
 
+def stub_embeddings() -> bool:
+    """True when embeddings are the hashed bag of words (no Modal embed model),
+    even if the Modal text model is configured."""
+    return config.USE_STUBS or not config.MODAL_EMBED_MODEL
+
+
 async def embed(text: str) -> list[float]:
     """Embedding vector for similarity search."""
-    if config.USE_STUBS or not config.MODAL_EMBED_MODEL:
+    if stub_embeddings():
         return _stub_embed(text)
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(f"{config.MODAL_ENDPOINT_URL}/embeddings",

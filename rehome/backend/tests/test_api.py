@@ -36,6 +36,17 @@ def test_impact_events_carry_type_and_category():
     assert typed["request_made"]["category"] is None
 
 
+def test_stub_embeddings_keep_their_threshold_with_a_real_text_model(monkeypatch):
+    """Modal text model set, no embed model: matching must still use the stub cutoff."""
+    from app.agents import orchestrator
+    from app.core import config
+    monkeypatch.setattr(config, "USE_STUBS", False)
+    monkeypatch.setattr(config, "MODAL_EMBED_MODEL", "")
+    assert orchestrator._threshold() == 0.2
+    monkeypatch.setattr(config, "MODAL_EMBED_MODEL", "bge")
+    assert orchestrator._threshold() == config.MATCH_THRESHOLD
+
+
 def test_seed_skips_items_already_in_db():
     """After a restart _seeded is empty but Tiger still holds the seed items."""
     from app.agents import orchestrator

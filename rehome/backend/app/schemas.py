@@ -61,6 +61,11 @@ class DonateOut(BaseModel):
     item_id: str
     status: ItemStatus
     message: str
+    waiting_requests: list[str] = Field(default_factory=list)   # matchmaker found these
+
+
+class PostIn(BaseModel):
+    price: Optional[float] = None   # USD; default = category x condition heuristic
 
 
 class Price(BaseModel):
@@ -103,6 +108,24 @@ class PriceQuote(BaseModel):
 class SellOut(PriceQuote):
     draft_id: str
     basis: Literal["active listings", "estimate"]
+
+
+class HandleIn(BaseModel):
+    """What the donor wants; `auto` lets the concierge decide."""
+    preference: Literal["auto", "sell", "donate"] = "auto"
+
+
+class HandleOut(BaseModel):
+    """POST /api/items/{draft_id}/handle: what the concierge agent did."""
+    draft_id: str
+    action: Literal["listed", "donated"]
+    item_id: str
+    summary: str                      # what the concierge tells the donor
+    brain: Literal["modal", "rules"]  # who made the decisions
+    steps: list[str]                  # tools called, in order
+    price_quote: Optional[Price] = None
+    waiting_requests: list[str] = Field(default_factory=list)
+    listing: Optional["Listing"] = None
 
 
 class RequestIn(BaseModel):
@@ -202,7 +225,7 @@ class ImpactOut(BaseModel):
 
 class AgentEvent(BaseModel):
     id: int
-    agent: Literal["orchestrator", "parser", "pricing", "requester"]
+    agent: Literal["orchestrator", "concierge", "parser", "pricing", "requester", "matchmaker"]
     event_type: Optional[Literal["item_parsed", "item_donated", "price_quoted",
                                  "request_made", "match_made", "match_accepted"]] = None
     category: Optional[str] = None
@@ -210,3 +233,6 @@ class AgentEvent(BaseModel):
     item_id: Optional[str] = None
     request_id: Optional[str] = None
     created_at: datetime
+
+
+HandleOut.model_rebuild()   # resolves the forward reference to Listing

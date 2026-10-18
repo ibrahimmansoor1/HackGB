@@ -1,9 +1,9 @@
 """Donor endpoints. Contract: docs/04-api-contract.md"""
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from app.agents import orchestrator
+from app.agents import concierge, orchestrator
 from app.core import config
-from app.schemas import (DonateIn, DonateOut, DraftOut, Item, ItemStatus, ListIn, ListItemOut,
-                         SellOut)
+from app.schemas import (DonateIn, DonateOut, DraftOut, HandleIn, HandleOut, Item, ItemStatus,
+                         ListIn, ListItemOut, PostIn, SellOut)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
@@ -61,6 +61,24 @@ async def sell_draft(draft_id: str):
         raise HTTPException(e.status_code, e.detail)
 
 
+@router.post("/{draft_id}/handle", response_model=HandleOut)
+async def handle_draft(draft_id: str, body: HandleIn | None = None):
+    """Hand the draft to the concierge agent: it prices it, checks local demand,
+    then lists or donates it, and says what it did."""
+    try:
+        return await concierge.handle(draft_id, body.preference if body else "auto")
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
+@router.post("/{draft_id}/post", response_model=ListItemOut, status_code=201)
+async def post_draft(draft_id: str, body: PostIn | None = None):
+    try:
+        return await orchestrator.post_draft(draft_id, body.price if body else None)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
 @router.post("/{draft_id}/donate", response_model=DonateOut, status_code=201)
 async def donate_draft(draft_id: str, body: DonateIn | None = None):
     try:
@@ -98,11 +116,8 @@ async def list_items(status: ItemStatus | None = None):
 
 @router.post("/{item_id}/list", response_model=ListItemOut)
 async def list_on_marketplace(item_id: str, body: ListIn | None = None):
-    """List an available item, or a sell draft (drf_...) straight from its quote."""
-    price = body.price if body else None
+    """List an available item at an optional price. Drafts use /{draft_id}/post."""
     try:
-        if orchestrator.is_draft_id(item_id):
-            return await orchestrator.list_draft(item_id, price)
-        return await orchestrator.list_item(item_id, price=price)
+        return await orchestrator.list_item(item_id, price=body.price if body else None)
     except orchestrator.FlowError as e:
         raise HTTPException(e.status_code, e.detail)

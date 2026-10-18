@@ -1,4 +1,4 @@
-"""Sell side, draft -> Nostr listing (POST /api/items/{draft_id}/list). Dry run only.
+"""Sell side, draft -> Nostr listing (POST /api/items/{draft_id}/post). Dry run only.
 cd backend && pytest"""
 import pytest
 from fastapi.testclient import TestClient
@@ -36,8 +36,8 @@ def test_sell_draft_then_list_at_the_sellers_price():
     price = (quote["low"] + quote["high"]) / 2
     donated_before = _donated_total()
 
-    r = client.post(f"/api/items/{draft_id}/list", json={"price": price})
-    assert r.status_code == 200, r.text
+    r = client.post(f"/api/items/{draft_id}/post", json={"price": price})
+    assert r.status_code == 201, r.text
     body = r.json()
     assert body["item"]["status"] == "listed" and body["item"]["id"].startswith("itm_")
     assert body["listing"]["price"] == price and body["listing"]["dry_run"] is True
@@ -46,29 +46,29 @@ def test_sell_draft_then_list_at_the_sellers_price():
     # a sale is not a donation, and the draft is used up
     assert _donated_total() == donated_before
     assert client.post(f"/api/items/{draft_id}/donate").status_code == 404
-    assert client.post(f"/api/items/{draft_id}/list").status_code == 404
+    assert client.post(f"/api/items/{draft_id}/post").status_code == 404
     msgs = [e["message"] for e in client.get("/api/events").json()["events"]]
     item_id = body["item"]["id"]
-    assert f"Saved {item_id} to sell" in msgs
-    assert f"Priced {item_id} at ${price:g} (seller's price)" in msgs
+    assert f"Saved {item_id} to list for sale" in msgs
+    assert f"Priced {item_id} at ${price:g} (from the price quote)" in msgs
 
 
-def test_list_draft_without_a_price_uses_the_default():
-    r = client.post(f"/api/items/{_draft()}/list")
-    assert r.status_code == 200
+def test_post_draft_without_a_price_uses_the_default():
+    r = client.post(f"/api/items/{_draft()}/post")
+    assert r.status_code == 201
     assert r.json()["listing"]["price"] == 25          # outerwear, like new
 
 
-def test_list_rejects_bad_prices_and_unknown_drafts():
+def test_post_rejects_bad_prices_and_unknown_drafts():
     draft_id = _draft()
-    assert client.post(f"/api/items/{draft_id}/list", json={"price": 0}).status_code == 422
-    assert client.post(f"/api/items/{draft_id}/list", json={"price": -5}).status_code == 422
-    assert client.post("/api/items/drf_9999/list").status_code == 404
-    assert client.post(f"/api/items/{draft_id}/list").status_code == 200   # still usable
+    assert client.post(f"/api/items/{draft_id}/post", json={"price": 0}).status_code == 422
+    assert client.post(f"/api/items/{draft_id}/post", json={"price": -5}).status_code == 422
+    assert client.post("/api/items/drf_9999/post").status_code == 404
+    assert client.post(f"/api/items/{draft_id}/post").status_code == 201   # still usable
 
 
 def test_listed_draft_is_never_suggested_to_requesters():
-    client.post(f"/api/items/{_draft()}/list")
+    client.post(f"/api/items/{_draft()}/post")
     body = client.post("/api/requests", json={
         "text": "need a warm coat, moving to Chicago in December", "zip": "60601"}).json()
     assert all(m["item"]["status"] == "available" for m in body["matches"])
