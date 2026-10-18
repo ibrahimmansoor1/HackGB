@@ -134,6 +134,13 @@ npm run dev   # http://localhost:5173
 
 The frontend reads `PUBLIC_API_URL` (default `http://localhost:8000`).
 
+**Feature-check page (Streamlit, no Node needed).** Clicks through every endpoint: parse → sell / donate, request → claim, inventory, listing + 30-day expiry, impact, activity feed. With the backend running, from `backend/` with the venv active:
+```bash
+pip install -r requirements-verify.txt
+streamlit run tools/verify_app.py   # http://localhost:8501
+```
+Set `REHOME_API` (or the sidebar field) to check another backend.
+
 **Two laptops (app + feed screen):** run the backend with `--host 0.0.0.0`, then in `.env` set `PUBLIC_BASE_URL=http://<backend laptop's IP>:8000` (so photo links work from the other laptop) and add the frontend's origin to `CORS_ORIGINS`.
 
 ## Working together
