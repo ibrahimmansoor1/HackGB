@@ -184,8 +184,9 @@ def _summary(run: _Run) -> str:
     quote = ""
     if run.quote:
         p = run.quote.suggested_price
-        label = "similar items are listed for" if run.quote.basis == "active listings" \
-            else "I estimate it's worth"
+        label = {"active listings": "similar items are listed for",
+                 "web search": "similar items go for online"}.get(run.quote.basis,
+                                                                  "I estimate it's worth")
         quote = f"{label} ${p.low:g}–{p.high:g}"
     if run.action == "listed":
         return (f"I priced your {what} ({quote}) and listed it on Shopstr for "

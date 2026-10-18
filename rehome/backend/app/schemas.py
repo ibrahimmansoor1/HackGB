@@ -103,7 +103,7 @@ class Comp(BaseModel):
     title: str
     price: float
     condition: Optional[str] = None
-    source: Literal["ebay"] = "ebay"
+    source: str = "ebay"            # "ebay", or the site a web result came from
     url: str
 
 
@@ -126,7 +126,7 @@ class PriceQuote(BaseModel):
 
 class SellOut(PriceQuote):
     draft_id: str
-    basis: Literal["active listings", "estimate"]
+    basis: Literal["active listings", "web search", "estimate"]
 
 
 class HandleIn(BaseModel):

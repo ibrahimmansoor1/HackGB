@@ -1,8 +1,12 @@
-"""Pricing agent: ParsedItem + eBay comps -> PriceQuote (S4 -> S5), on Modal.
-Pure function: never touches the DB or eBay (the orchestrator fetches comps).
+"""Pricing agent: ParsedItem + eBay comps, or web search results (Brave), ->
+PriceQuote (S4 -> S5), on Modal. Pure function: never touches the DB, eBay,
+or the web (the orchestrator fetches comps and search results).
 Prompt spec in docs/05-agents.md."""
 import json
+import re
 import statistics
+from urllib.parse import urlparse
+
 from pydantic import ValidationError
 from app.agents import stub_rules
 from app.core import config, llm
@@ -16,6 +20,51 @@ higher than sale prices; aim below the median). Write a listing title
 Return ONLY JSON with keys: suggested_price {low, high, currency}, comps,
 listing_draft {title, description}. comps: the input listings you kept, unchanged.
 No prose, no markdown fences."""
+
+
+SEARCH_PROMPT = """You price secondhand items from web search results. You get an item
+and search results (title, url, snippet) about what similar items sell for.
+Keep only results that show a price for the same kind of item (same brand and
+type when the item has a brand). For each one you keep, give its title, the
+price in USD, its condition if stated, the site as source (e.g. "ebay.com"),
+and its url exactly as given. Suggest a realistic resale range for this
+item's condition, aiming below typical asking prices. Write a listing title
+(<= 80 chars, brand + item + size + condition) and a 2-4 sentence description.
+Return ONLY JSON with keys: suggested_price {low, high, currency}, comps,
+listing_draft {title, description}. No prose, no markdown fences."""
+
+PRICE_RE = re.compile(r"\$\s?(\d{1,4}(?:,\d{3})*(?:\.\d{2})?)")
+
+
+async def from_search(item: dict, results: list[dict]) -> PriceQuote:
+    """Going rates from web results (Brave). Comps keep only URLs that were in
+    the results, so nothing is invented."""
+    if config.USE_STUBS:
+        quote_ = _stub(item, _prices_from_snippets(results))
+    else:
+        user = f"Item: {json.dumps(item)}\nSearch results: {json.dumps(results)}"
+        for attempt in range(2):
+            try:
+                quote_ = PriceQuote.model_validate(await llm.complete_json(SEARCH_PROMPT, user))
+                break
+            except (ValidationError, ValueError):
+                if attempt == 1:
+                    raise
+    urls = {r["url"] for r in results}
+    quote_.comps = [c for c in quote_.comps if c.url in urls and c.price > 0]
+    return quote_
+
+
+def _prices_from_snippets(results: list[dict]) -> list[dict]:
+    """Stub: first $ amount in each result's title or snippet."""
+    comps = []
+    for r in results:
+        m = PRICE_RE.search(f"{r['title']} {r['snippet']}")
+        if m:
+            comps.append({"title": r["title"], "price": float(m.group(1).replace(",", "")),
+                          "condition": None, "source": urlparse(r["url"]).netloc.removeprefix("www."),
+                          "url": r["url"]})
+    return comps
 
 
 async def quote(item: dict, comps: list[dict]) -> PriceQuote:
