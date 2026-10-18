@@ -5,7 +5,7 @@
 - [ ] Donor uploads a photo → parsed item appears in inventory
 - [ ] Requester types a need → ranked matches with reasons
 - [ ] Activity feed shows agent steps live
-- [ ] Seeded inventory of 15–20 varied items (`POST /api/admin/seed` has a starter set)
+- [x] Seeded inventory of 18 varied items with photos (`POST /api/admin/seed`)
 - [ ] Runs from a clean clone with the README steps
 
 ## Stretch (only after MVP is solid)

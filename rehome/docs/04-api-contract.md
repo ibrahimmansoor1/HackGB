@@ -37,18 +37,20 @@ This file is the contract between frontend and backend. Change it here first.
   "season": "winter",
   "attributes": ["insulated", "hooded", "water-resistant"],
   "summary": "Black hooded puffer jacket, size M, like new.",
-  "image_url": "/static/uploads/itm_0142.jpg",
+  "image_url": "http://localhost:8000/static/uploads/itm_0142.jpg",
   "status": "available",
   "created_at": "2026-10-18T14:02:00Z"
 }
 ```
-(`embedding` is never returned to the frontend.)
+(`embedding` is never returned to the frontend.) `image_url` is absolute, built from `PUBLIC_BASE_URL`, so the frontend uses it as is; it is `null` when no photo was sent.
+
+**Errors:** `400` neither image nor note (a blank note counts as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip`.
 
 ---
 
 ## `GET /api/items?status=available` — list inventory
 
-**Response `200`:** `{ "items": [ Item, ... ] }` (same shape as above)
+**Response `200`:** `{ "items": [ Item, ... ] }` (same shape as above). `status` is optional (omit for all items); any value other than `available`, `listed`, `reserved`, `donated` is a `422`.
 
 ---
 
@@ -89,6 +91,8 @@ This file is the contract between frontend and backend. Change it here first.
 ```
 If nothing clears the threshold: `"status": "open"`, `"matches": []`.
 
+`score` is the raw similarity (0–1); `rank` is the order after re-ranking (docs/05), so rank 1 can have a lower `score` than rank 2. The rank-1 item becomes `reserved`.
+
 ---
 
 ## `GET /api/events?after=<id>` — activity feed
@@ -113,8 +117,8 @@ Poll every ~1 s. Returns events with `id > after`, oldest first, max 50.
 |---|---|---|
 | `POST` | `/api/items/{id}/list` | Price the item, post it as a Nostr classified listing (shows on Shopstr), set `listed` |
 | `POST` | `/api/admin/simulate-expiry` | Treat all active listings as 30 days old; close them on Nostr; item → `available` (donation pool) |
-| `GET` | `/api/listings?status=active` | List marketplace listings (`status` optional: `active` or `expired`) |
-| `POST` | `/api/admin/seed` | Load demo inventory (15–20 items) |
+| `GET` | `/api/listings?status=active` | List marketplace listings (`status` optional: `active` or `expired`; anything else is `422`) |
+| `POST` | `/api/admin/seed` | Load the 18-item demo inventory. Returns `{"seeded": 18}`, or `{"seeded": 0}` if it was already loaded (no duplicates) |
 
 Marketplace posts are **dry runs by default** (signed with a throwaway key, not sent to relays). They go live only when `NOSTR_NSEC` is set and `MARKETPLACE_DRY_RUN=false`. See the README's "Marketplace" section.
 

@@ -96,10 +96,23 @@ Candidates: {list of item summaries + attributes}
 
 ---
 
+## Stub mode (no model configured)
+
+With no `MODAL_ENDPOINT_URL`, the whole demo still runs, deterministically and offline. The stubs live in `backend/app/agents/stub_rules.py` (pure functions, same JSON schemas as above):
+
+- **Parser:** keyword rules read category, item, color, size (only if stated), condition, season, and attributes from the note. A photo with no note reads as a black puffer jacket (the item the demo script photographs).
+- **Requester:** infers climate from month words, place names, then zip (cold zips only imply winter gear for outerwear/accessories): Chicago + December → `must_have: ["insulated", "water-resistant"]`. "For my daughter" → kids items only.
+- **Embeddings:** hashed bag of words with plural/synonym folding (`pots` → `cookware`, `jacket` → `coat`).
+- **Ranking:** threshold `0.2` instead of `MATCH_THRESHOLD`; searches `3 × TOP_K` candidates, adds +0.1 for the requested category, drops kids/adult mismatches and other-category items that meet no `must_have`, then keeps `TOP_K`. `waterproof` satisfies `water-resistant`.
+- **Reasons:** template, ≤ 12 words: "Insulated and water-resistant, built for sub-freezing winters" · "Wool and warm, but not insulated" · "Not boots, but insulated and waterproof".
+
+With a model configured, the reason call falls back to these templates if the model fails.
+
 ## Events to emit (activity feed)
 
 | Step | agent | Example message |
 |---|---|---|
+| Demo seed | orchestrator | Loaded 18 demo items into inventory |
 | Upload received | orchestrator | New donation received |
 | Parsed | parser | Identified black puffer jacket, size M |
 | Stored | orchestrator | Saved itm_0142 as available |
@@ -107,6 +120,7 @@ Candidates: {list of item summaries + attributes}
 | Query built | requester | Inferred snow and sub-freezing winters; needs insulated, water-resistant |
 | Search done | orchestrator | Found 3 candidates |
 | Matched | orchestrator | Matched itm_0142 (0.89) and reserved it |
+| No match | orchestrator | No good match yet; request left open |
 | Priced *(stretch)* | orchestrator | Priced itm_0142 at $25 (outerwear, like new) |
 | Listed *(stretch)* | orchestrator | Listed itm_0142 on Shopstr — 3/3 relays · or · Listed itm_0142 on Shopstr (dry run) |
 | Listing failed *(stretch)* | orchestrator | Couldn't list itm_0142 on Shopstr — 0/3 relays accepted; item stays available |
