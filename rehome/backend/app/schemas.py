@@ -117,6 +117,7 @@ class HandleIn(BaseModel):
 
 class HandleOut(BaseModel):
     """POST /api/items/{draft_id}/handle: what the concierge agent did."""
+    run_id: str                       # GET /api/events?run_id=... replays every step
     draft_id: str
     action: Literal["listed", "donated"]
     item_id: str
@@ -221,6 +222,10 @@ class AgentEvent(BaseModel):
     message: str
     item_id: Optional[str] = None
     request_id: Optional[str] = None
+    run_id: Optional[str] = None        # agent run (concierge) this step belongs to
+    tool: Optional[str] = None          # tool the agent called
+    duration_ms: Optional[int] = None   # how long the tool took
+    data: Optional[dict] = None         # tool result / decision details
     created_at: datetime
 
 

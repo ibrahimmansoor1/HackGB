@@ -89,6 +89,10 @@ Database: **Tiger Data** (managed Postgres + TimescaleDB). pgvector does matchin
 | request_id | string \| null | events.py | |
 | category | string \| null | events.py | item category, for impact stats |
 | message | string | events.py | human-readable, shown in the feed |
+| run_id | string \| null | events.py | one agent run (`run_…`); set on every event emitted during a concierge run, including the specialists it calls |
+| tool | string \| null | events.py | tool the agent called (`get_price_quote`, `check_local_demand`, `list_for_sale`, `donate_item`) |
+| duration_ms | int \| null | events.py | how long the tool (or, on the run's last event, the whole run) took |
+| data | JSONB \| null | events.py | tool result, the decision (`brain`, `decision`, `price`, quote), or a tool error |
 
 ## impact_hourly *(continuous aggregate over `events`)*
 

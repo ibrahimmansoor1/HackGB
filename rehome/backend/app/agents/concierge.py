@@ -13,6 +13,8 @@ Offline (no Modal) or if the model fails, a rule policy plays the concierge
 in the same graph, so the flow, the feed, and the tests are identical.
 """
 import json
+import time
+import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
@@ -21,7 +23,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agents import orchestrator
-from app.agents.events import emit
+from app.agents.events import current_run, emit
 from app.core import config, llm
 from app.schemas import HandleOut
 
@@ -70,22 +72,25 @@ def _tools(run: _Run) -> list:
     @tool
     async def get_price_quote() -> str:
         """Ask the pricing agent what the donor's item would sell for (eBay comps)."""
-        run.steps.append("get_price_quote")
-        emit("concierge", "→ pricing: what would this sell for?")
+        t = _start(run, "get_price_quote", "→ pricing: what would this sell for?")
         run.quote = await orchestrator.sell_draft(run.draft_id)
         p = run.quote.suggested_price
-        return json.dumps({"low": p.low, "high": p.high, "basis": run.quote.basis,
-                           "comps": len(run.quote.comps),
-                           "listing_title": run.quote.listing_draft.title})
+        return _done(run, "get_price_quote", t, "pricing",
+                     f"${p.low:g}–{p.high:g} ({run.quote.basis})",
+                     {"low": p.low, "high": p.high, "basis": run.quote.basis,
+                      "comps": len(run.quote.comps),
+                      "listing_title": run.quote.listing_draft.title})
 
     @tool
     async def check_local_demand() -> str:
         """Ask the matchmaker agent whether anyone nearby has an open request for this item."""
-        run.steps.append("check_local_demand")
-        emit("concierge", "→ matchmaker: is anyone nearby waiting for this?")
+        t = _start(run, "check_local_demand", "→ matchmaker: is anyone nearby waiting for this?")
         run.demand = await orchestrator.local_demand(run.item)
-        return json.dumps({"waiting_requests": len(run.demand),
-                           "needs": [", ".join(d["needs"]) for d in run.demand]})
+        n = len(run.demand)
+        return _done(run, "check_local_demand", t, "matchmaker",
+                     f"{n} waiting request{'s' * (n != 1)}",
+                     {"waiting_requests": n, "needs": [", ".join(d["needs"]) for d in run.demand],
+                      "request_ids": [d["request_id"] for d in run.demand]})
 
     @tool
     async def list_for_sale(price: float) -> str:
@@ -101,23 +106,50 @@ def _tools(run: _Run) -> list:
     return [get_price_quote, check_local_demand, list_for_sale, donate_item]
 
 
+def _start(run: _Run, tool_name: str, ask: str) -> float:
+    """Log the request to a specialist; returns the start time for _done."""
+    run.steps.append(tool_name)
+    emit("concierge", ask, tool=tool_name)
+    return time.perf_counter()
+
+
+def _done(run: _Run, tool_name: str, started: float, agent: str, summary: str,
+          result: dict) -> str:
+    """Log the specialist's answer (tool, latency, result) and hand it to the model."""
+    ms = round((time.perf_counter() - started) * 1000)
+    emit(agent, f"← {summary} ({ms} ms)", tool=tool_name, duration_ms=ms, data=result)
+    return json.dumps(result)
+
+
 async def _act(run: _Run, action: str, price: float | None = None) -> str:
+    name = "list_for_sale" if action == "listed" else "donate_item"
     if run.action:
+        emit("concierge", f"Refused a second action ({name}): already {run.action}", tool=name)
         return f"Already done: the item was {run.action}. Now reply to the donor."
     run.action = action           # set before awaiting, so parallel calls can't both act
-    run.steps.append("list_for_sale" if action == "listed" else "donate_item")
+    p = run.quote.suggested_price if run.quote else None
+    emit("concierge", f"Decided ({run.brain}): {'sell for $%g' % price if price else action}",
+         data={"decision": name, "brain": run.brain, "price": price,
+               "preference": run.preference, "waiting_requests": len(run.demand or []),
+               "quote": {"low": p.low, "high": p.high} if p else None})
     try:
         if action == "listed":
-            emit("concierge", f"→ marketplace: list it on Shopstr for ${price:g}")
+            t = _start(run, name, f"→ marketplace: list it on Shopstr for ${price:g}")
             run.result = await orchestrator.post_draft(run.draft_id, price)
-            return json.dumps({"listed": True, "item_id": run.result.item.id,
-                               "price": run.result.listing.price})
-        emit("concierge", "→ donation: make it searchable and offer it to waiting requests")
+            return _done(run, name, t, "concierge",
+                         f"listed {run.result.item.id} for ${run.result.listing.price:g}",
+                         {"listed": True, "item_id": run.result.item.id,
+                          "price": run.result.listing.price, "url": run.result.listing.url,
+                          "dry_run": run.result.listing.dry_run})
+        t = _start(run, name, "→ donation: make it searchable and offer it to waiting requests")
         run.result = await orchestrator.donate_draft(run.draft_id)
-        return json.dumps({"donated": True, "item_id": run.result.item_id,
-                           "offered_to": run.result.waiting_requests})
+        return _done(run, name, t, "concierge", f"donated {run.result.item_id}",
+                     {"donated": True, "item_id": run.result.item_id,
+                      "offered_to": run.result.waiting_requests})
     except orchestrator.FlowError as e:
         run.action = None
+        emit("concierge", f"Tool error ({name}): {e.detail}", tool=name,
+             data={"error": e.detail, "status": e.status_code})
         return f"Error: {e.detail}"
 
 
@@ -193,10 +225,23 @@ def _graph(run: _Run):
 
 
 async def handle(draft_id: str, preference: str = "auto") -> HandleOut:
-    """Run the concierge on a draft until it is listed or donated."""
+    """Run the concierge on a draft until it is listed or donated. Every event
+    in the run (its own, and those of the agents it calls) shares one run_id."""
     run = _Run(draft_id, preference)
+    token = current_run.set(f"run_{uuid.uuid4().hex[:10]}")
+    try:
+        return await _handle(run)
+    finally:
+        current_run.reset(token)
+
+
+async def _handle(run: _Run) -> HandleOut:
+    draft_id, preference = run.draft_id, run.preference
+    started = time.perf_counter()
     emit("concierge", f"Taking over {draft_id} ({run.item['item']}): price it, check "
-         "local demand, then sell or donate")
+         "local demand, then sell or donate",
+         data={"draft_id": draft_id, "preference": preference, "brain": run.brain,
+               "model": config.MODAL_AGENT_MODEL if run.brain == "modal" else None})
     messages = [SystemMessage(SYSTEM_PROMPT),
                 HumanMessage(json.dumps({"item": run.item, "donor_preference": preference}))]
     final = ""
@@ -222,11 +267,15 @@ async def handle(draft_id: str, preference: str = "auto") -> HandleOut:
             raise orchestrator.FlowError(502, f"The concierge couldn't finish: {result}")
 
     summary = final.strip() if isinstance(final, str) and final.strip() else _summary(run)
-    emit("concierge", summary)
     listed = run.action == "listed"
+    item_id = run.result.item.id if listed else run.result.item_id
+    ms = round((time.perf_counter() - started) * 1000)
+    emit("concierge", summary, item_id=item_id, duration_ms=ms,
+         data={"action": run.action, "brain": run.brain, "steps": run.steps})
     return HandleOut(
-        draft_id=draft_id, action=run.action, summary=summary, brain=run.brain,
-        steps=run.steps, item_id=run.result.item.id if listed else run.result.item_id,
+        run_id=current_run.get(), draft_id=draft_id, action=run.action, summary=summary,
+        brain=run.brain,
+        steps=run.steps, item_id=item_id,
         price_quote=run.quote.suggested_price if run.quote else None,
         waiting_requests=[] if listed else run.result.waiting_requests,
         listing=run.result.listing if listed else None)

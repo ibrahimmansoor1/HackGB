@@ -52,6 +52,32 @@ def test_worth_selling_and_nobody_waiting_gets_listed():
     assert "→ matchmaker: is anyone nearby waiting for this?" in msgs
 
 
+def test_run_is_traced_in_the_events_table():
+    client.post("/api/requests", json={"text": "a unicorn costume", "zip": "54311"})  # other run
+    out = _handle().json()
+    assert out["run_id"].startswith("run_")
+    trail = client.get(f"/api/events?run_id={out['run_id']}").json()["events"]
+    assert trail and all(e["run_id"] == out["run_id"] for e in trail)
+    agents = {e["agent"] for e in trail}
+    assert {"concierge", "pricing", "matchmaker"} <= agents   # specialists share the run_id
+    assert not any(e["message"].startswith("New request") for e in trail)
+
+    answers = {e["tool"]: e for e in trail if e["tool"] and e["duration_ms"] is not None}
+    assert set(answers) == {"get_price_quote", "check_local_demand", "list_for_sale"}
+    assert answers["get_price_quote"]["data"] == {"low": 15, "high": 23, "basis": "estimate",
+                                                 "comps": 0, "listing_title":
+                                                 "Black Puffer Jacket, Size M, Good"}
+    assert answers["list_for_sale"]["data"]["price"] == 19
+    decided = next(e for e in trail if e["message"].startswith("Decided"))
+    assert decided["data"]["decision"] == "list_for_sale" and decided["data"]["brain"] == "rules"
+    last = trail[-1]
+    assert last["message"] == out["summary"] and last["data"]["steps"] == out["steps"]
+    assert last["duration_ms"] >= 0 and last["item_id"] == out["item_id"]
+
+    other = client.get("/api/events").json()["events"]
+    assert any(e["run_id"] is None for e in other)            # non-agent events stay untagged
+
+
 def test_someone_waiting_means_donate_and_offer_it():
     req = client.post("/api/requests", json=CHICAGO).json()
     out = _handle().json()

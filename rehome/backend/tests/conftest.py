@@ -1,11 +1,12 @@
 """Every test starts with an empty in-memory DB (ids keep counting up).
-Tests never touch Tiger or Gemini, even if .env configures them; test_tiger.py
+Tests never touch Tiger, Gemini, or Modal, even if .env configures them; test_tiger.py
 covers the Postgres backend against TEST_DATABASE_URL."""
 import os
 
 # Before app imports; load_dotenv won't override variables that are already set.
 os.environ["DATABASE_URL"] = ""
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["MODAL_ENDPOINT_URL"] = ""     # stub mode; tests fake model calls explicitly
 os.environ["EBAY_APP_ID"] = os.environ["EBAY_CERT_ID"] = ""
 
 import pytest  # noqa: E402
