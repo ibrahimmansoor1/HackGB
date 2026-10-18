@@ -1,42 +1,65 @@
 <script>
-  import { donateItem, BASE } from '$lib/api.js';
+  import { parseItem, donateDraft } from '$lib/api.js';
 
-  let image = $state(null);
-  let note = $state('');
+  let images = $state([]);
+  let text = $state('');
   let zip = $state('');
-  let loading = $state(false);
+  let loading = $state('');
   let error = $state('');
-  let item = $state(null);
+  let draft = $state(null);
+  let donated = $state(null);
 
-  async function submit() {
-    if (!image && !note) { error = 'Add a photo or a short description.'; return; }
-    if (!zip) { error = 'Add your zip code.'; return; }
-    loading = true; error = ''; item = null;
-    try { item = await donateItem({ image, note, zip }); }
+  async function run(label, fn) {
+    loading = label; error = '';
+    try { await fn(); }
     catch (e) { error = e.message; }
-    finally { loading = false; }
+    finally { loading = ''; }
+  }
+
+  function describe() {
+    if (!images.length && !text) { error = 'Add a photo or a short description.'; return; }
+    if (!zip) { error = 'Add your zip code.'; return; }
+    draft = null; donated = null;
+    run('Describing your item…', async () => { draft = await parseItem({ images, text, zip }); });
+  }
+
+  function donate() {
+    run('Donating…', async () => { donated = await donateDraft(draft.draft_id); });
+  }
+
+  function startOver() {
+    draft = null; donated = null; images = []; text = '';
   }
 </script>
 
 <h1>Give something</h1>
 
-<label for="photo">Photo</label>
-<input id="photo" type="file" accept="image/*" capture="environment"
-  onchange={(e) => (image = e.currentTarget.files?.[0] ?? null)} />
+{#if !draft}
+  <label for="photo">Photos</label>
+  <input id="photo" type="file" accept="image/*" capture="environment" multiple
+    onchange={(e) => (images = [...(e.currentTarget.files ?? [])])} />
 
-<label for="note">Anything we should know? (optional)</label>
-<textarea id="note" rows="2" bind:value={note} placeholder="Barely worn, size M"></textarea>
+  <label for="text">Anything we should know? (optional)</label>
+  <textarea id="text" rows="2" bind:value={text} placeholder="Barely worn, size M"></textarea>
 
-<label for="zip">Zip code</label>
-<input id="zip" bind:value={zip} inputmode="numeric" maxlength="5" />
+  <label for="zip">Zip code</label>
+  <input id="zip" bind:value={zip} inputmode="numeric" maxlength="5" />
 
-<button onclick={submit} disabled={loading}>{loading ? 'Describing your item…' : 'Give item'}</button>
+  <button onclick={describe} disabled={!!loading}>{loading || 'Describe my item'}</button>
+{:else}
+  {@const it = draft.item}
+  <h2>{it.color} {it.brand ? `${it.brand} ` : ''}{it.item}</h2>
+  {#if draft.image_url}<img src={draft.image_url} alt={it.summary} width="240" />{/if}
+  <p>{it.summary}</p>
+  <p>{it.attributes.join(', ')} · {it.condition}{it.size ? ` · size ${it.size}` : ''}</p>
+
+  {#if donated}
+    <p role="status">{donated.message}</p>
+    <button onclick={startOver}>Give something else</button>
+  {:else}
+    <button onclick={donate} disabled={!!loading}>{loading || 'Donate it'}</button>
+    <button onclick={startOver} disabled={!!loading}>Start over</button>
+  {/if}
+{/if}
 
 {#if error}<p role="alert">{error}</p>{/if}
-
-{#if item}
-  <h2>Listed: {item.color} {item.item}</h2>
-  {#if item.image_url}<img src={BASE + item.image_url} alt={item.summary} width="240" />{/if}
-  <p>{item.summary}</p>
-  <p>{item.attributes.join(', ')} · {item.condition}{item.size ? ` · size ${item.size}` : ''}</p>
-{/if}

@@ -14,7 +14,9 @@ _requests: dict[str, dict] = {}
 _matches: list[dict] = []
 _events: list[dict] = []
 _listings: dict[str, dict] = {}
+_drafts: dict[str, dict] = {}
 _item_ids = itertools.count(1)
+_draft_ids = itertools.count(1)
 _req_ids = itertools.count(1)
 _event_ids = itertools.count(1)
 _listing_ids = itertools.count(1)
@@ -30,6 +32,25 @@ def new_item_id() -> str:
 
 def new_request_id() -> str:
     return f"req_{next(_req_ids):04d}"
+
+
+def new_draft_id() -> str:
+    return f"drf_{next(_draft_ids):04d}"
+
+
+# ---- drafts (parsed, not yet sold or donated) ------------------------------
+def insert_draft(row: dict) -> dict:
+    _drafts[row["id"]] = row
+    return row
+
+
+def get_draft(draft_id: str) -> dict | None:
+    return _drafts.get(draft_id)
+
+
+def pop_draft(draft_id: str) -> dict | None:
+    """Remove and return the draft; None if it was already taken."""
+    return _drafts.pop(draft_id, None)
 
 
 # ---- items -----------------------------------------------------------------

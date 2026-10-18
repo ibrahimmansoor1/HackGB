@@ -188,7 +188,7 @@ def test_feed_shows_every_docs05_step():
     assert all(e["id"] > start for e in events)
     by_agent = {(e["agent"], e["message"]) for e in events}
     msgs = [m for _, m in by_agent]
-    steps = [("orchestrator", "New donation received"),
+    steps = [("orchestrator", "New item received"),
              ("parser", "Identified black puffer jacket, size M"),
              ("orchestrator", f"Saved {item_id} as available"),
              ("orchestrator", "New request from 60601")]

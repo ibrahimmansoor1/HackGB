@@ -15,7 +15,7 @@ from app.core import db  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def fresh_db(monkeypatch):
-    for name in ("_items", "_requests", "_listings"):
+    for name in ("_items", "_requests", "_listings", "_drafts"):
         monkeypatch.setattr(db, name, {})
     for name in ("_matches", "_events"):
         monkeypatch.setattr(db, name, [])

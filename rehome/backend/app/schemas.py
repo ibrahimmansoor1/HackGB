@@ -45,6 +45,24 @@ class Item(ParsedItem):
     created_at: datetime
 
 
+class DraftOut(BaseModel):
+    """POST /api/items/parse: parsed, not stored as an item until the donor chooses."""
+    draft_id: str
+    item: ParsedItem
+    image_url: Optional[str] = None
+    options: list[Literal["sell", "donate"]] = ["sell", "donate"]
+
+
+class DonateIn(BaseModel):
+    pickup_zip: Optional[str] = None   # defaults to the draft's zip
+
+
+class DonateOut(BaseModel):
+    item_id: str
+    status: ItemStatus
+    message: str
+
+
 class RequestIn(BaseModel):
     text: str
     zip: str

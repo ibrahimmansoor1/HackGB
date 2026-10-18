@@ -58,9 +58,9 @@ This file is the contract between frontend and backend. Change it here first.
   "options": ["sell", "donate"]
 }
 ```
-Nothing is written to `items` yet.
+Nothing is written to `items` yet. `image_url` is the first photo (`null` without one). Drafts expire 24 h after parsing.
 
-**Errors:** `400` neither images nor text (blank text counts as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip`.
+**Errors:** `400` neither images nor text (blank text and empty files count as none) · `413` image over 10 MB · `415` image is not JPG, PNG, or WebP · `422` missing `zip` · `502` parser model failed.
 
 ---
 
@@ -96,7 +96,7 @@ No request body.
 ```json
 { "pickup_zip": "54311" }
 ```
-`pickup_zip` is optional; defaults to the draft's `zip`.
+The body is optional, and so is `pickup_zip`; it defaults to the draft's `zip`.
 
 **Response `201`:**
 ```json
@@ -104,13 +104,13 @@ No request body.
 ```
 The draft is consumed.
 
-**Errors:** `404` unknown or already-used draft.
+**Errors:** `404` unknown, expired, or already-used draft.
 
 ---
 
 ## `POST /api/items` — one-step donate *(legacy shortcut)*
 
-Same multipart fields as `/parse` (single `image` + `note`), parses and donates in one call, returns the full `Item`. Kept so existing tests and the scaffold frontend keep working; **remove once the frontend uses `/parse` + `/donate`.**
+Same multipart fields as `/parse` (single `image` + `note`), parses and donates in one call, returns the full `Item`. Same errors as `/parse`. Kept so existing tests and the scaffold frontend keep working; **remove once the frontend uses `/parse` + `/donate`.**
 
 ---
 

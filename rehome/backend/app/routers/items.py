@@ -2,38 +2,84 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.agents import orchestrator
 from app.core import config
-from app.schemas import Item, ItemStatus, ListItemOut
+from app.schemas import DonateIn, DonateOut, DraftOut, Item, ItemStatus, ListItemOut
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 MAX_BYTES = 10 * 1024 * 1024
 IMAGE_TYPES = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
+async def _read_images(files: list[UploadFile]) -> list[tuple[bytes, str]]:
+    """Validate uploads -> [(bytes, mime)]. Empty browser file fields are skipped."""
+    out = []
+    for f in files:
+        if not f.filename:
+            continue
+        mime = (f.content_type or "").lower()
+        if mime not in IMAGE_TYPES:
+            raise HTTPException(415, "Photo must be a JPG, PNG, or WebP image.")
+        data = await f.read(MAX_BYTES + 1)
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, "Image is larger than 10 MB.")
+        if data:
+            out.append((data, mime))
+    return out
+
+
+def _save_first(images: list[tuple[bytes, str]], name: str) -> str | None:
+    """Save the first photo as static/uploads/<name>.<ext>; return its URL."""
+    if not images:
+        return None
+    data, mime = images[0]
+    filename = f"{name}.{IMAGE_TYPES[mime]}"
+    (config.UPLOAD_DIR / filename).write_bytes(data)
+    return config.public_url(f"/static/uploads/{filename}")
+
+
+@router.post("/parse", response_model=DraftOut, status_code=201)
+async def parse_item(zip: str = Form(...), text: str | None = Form(None),
+                     donor_id: str = Form("demo_donor"),
+                     images: list[UploadFile] | None = File(None)):
+    text = (text or "").strip() or None
+    photos = await _read_images(images or [])
+    if not photos and not text:
+        raise HTTPException(400, "Send a photo, a description, or both.")
+    draft_id = orchestrator.new_draft_id()
+    try:
+        return await orchestrator.parse_draft(text, zip, donor_id, photos,
+                                              _save_first(photos, draft_id), draft_id)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
+@router.post("/{draft_id}/donate", response_model=DonateOut, status_code=201)
+async def donate_draft(draft_id: str, body: DonateIn | None = None):
+    try:
+        return await orchestrator.donate_draft(draft_id, body.pickup_zip if body else None)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
+
+
 @router.post("", response_model=Item, status_code=201)
 async def donate_item(zip: str = Form(...), note: str | None = Form(None),
                       donor_id: str = Form("demo_donor"),
                       image: UploadFile | None = File(None)):
+    """Legacy one-step donate; remove once the frontend uses /parse + /donate."""
     note = (note or "").strip() or None
     if image is not None and not image.filename:   # empty file field from a browser form
         image = None
     if not image and not note:
         raise HTTPException(400, "Send a photo, a note, or both.")
-    image_bytes, mime, url = None, "image/jpeg", None
-    if image:
-        mime = (image.content_type or "").lower()
-        if mime not in IMAGE_TYPES:
-            raise HTTPException(415, "Photo must be a JPG, PNG, or WebP image.")
-        image_bytes = await image.read(MAX_BYTES + 1) or None
-        if image_bytes and len(image_bytes) > MAX_BYTES:
-            raise HTTPException(413, "Image is larger than 10 MB.")
-        if not image_bytes and not note:
-            raise HTTPException(400, "The photo is empty. Send a photo, a note, or both.")
+    photos = await _read_images([image] if image else [])
+    if not photos and not note:
+        raise HTTPException(400, "The photo is empty. Send a photo, a note, or both.")
     item_id = orchestrator.new_item_id()
-    if image_bytes:
-        name = f"{item_id}.{IMAGE_TYPES[mime]}"
-        (config.UPLOAD_DIR / name).write_bytes(image_bytes)
-        url = config.public_url(f"/static/uploads/{name}")
-    return await orchestrator.donate(note, zip, donor_id, image_bytes, mime, url, item_id)
+    data, mime = photos[0] if photos else (None, "image/jpeg")
+    try:
+        return await orchestrator.donate(note, zip, donor_id, data, mime,
+                                         _save_first(photos, item_id), item_id)
+    except orchestrator.FlowError as e:
+        raise HTTPException(e.status_code, e.detail)
 
 
 @router.get("")

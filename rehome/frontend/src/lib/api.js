@@ -9,13 +9,24 @@ async function handle(res) {
   return body;
 }
 
-/** D1: donate an item. Returns the parsed Item. */
-export async function donateItem({ image, note, zip }) {
+/** D1: parse photos and/or text into a draft. Returns { draft_id, item, image_url, options }. */
+export async function parseItem({ images = [], text, zip }) {
   const form = new FormData();
-  if (image) form.append('image', image);
-  if (note) form.append('note', note);
+  for (const image of images) form.append('images', image);
+  if (text) form.append('text', text);
   form.append('zip', zip);
-  return handle(await fetch(`${BASE}/api/items`, { method: 'POST', body: form }));
+  return handle(await fetch(`${BASE}/api/items/parse`, { method: 'POST', body: form }));
+}
+
+/** N1: donate a draft. Returns { item_id, status, message }. */
+export async function donateDraft(draftId, pickupZip) {
+  return handle(
+    await fetch(`${BASE}/api/items/${draftId}/donate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pickupZip ? { pickup_zip: pickupZip } : {})
+    })
+  );
 }
 
 /** R1: request an item. Returns { request_id, status, query, matches }. */

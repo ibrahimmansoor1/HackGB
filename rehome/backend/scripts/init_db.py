@@ -16,8 +16,8 @@ from app.core import config  # noqa: E402
 SCHEMA = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
 RESET = """
 DROP MATERIALIZED VIEW IF EXISTS impact_hourly CASCADE;
-DROP TABLE IF EXISTS listings, matches, requests, items, events CASCADE;
-DROP SEQUENCE IF EXISTS item_seq, request_seq, match_seq, listing_seq;
+DROP TABLE IF EXISTS listings, matches, requests, items, events, drafts CASCADE;
+DROP SEQUENCE IF EXISTS item_seq, request_seq, match_seq, listing_seq, draft_seq;
 """
 
 

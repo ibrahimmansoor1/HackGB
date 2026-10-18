@@ -7,8 +7,8 @@ from app.agents.events import emit
 from app.core import config, db, llm
 from app.integrations import marketplace
 from app.seed_data import SEED_ITEMS, summary as seed_summary
-from app.schemas import (AgentEvent, ExpiryOut, Item, Listing, ListItemOut, Match,
-                         ParsedItem, RequestOut)
+from app.schemas import (AgentEvent, DonateOut, DraftOut, ExpiryOut, Item, Listing,
+                         ListItemOut, Match, ParsedItem, RequestOut)
 
 REASON_PROMPT = """For each candidate item, write one reason (max 12 words) explaining why it
 fits this request, or what it lacks. Return ONLY a JSON array of
@@ -17,6 +17,7 @@ fits this request, or what it lacks. Return ONLY a JSON array of
 # Stub embeddings score much lower than real ones.
 THRESHOLD = 0.2 if config.USE_STUBS else config.MATCH_THRESHOLD
 LISTING_DAYS = 30
+DRAFT_TTL = timedelta(hours=24)   # an unsold, undonated draft expires after this
 _listing_now: set[str] = set()   # items being published; guards double-clicks and matching
 
 
@@ -48,6 +49,10 @@ def new_item_id() -> str:
     return db.new_item_id()
 
 
+def new_draft_id() -> str:
+    return db.new_draft_id()
+
+
 def items(status: str | None = None) -> list[Item]:
     return [_public(r) for r in db.list_items(status)]
 
@@ -61,20 +66,65 @@ def db_backend() -> str:
     return db.BACKEND
 
 
-# ---- donor path: D1 -> D4 --------------------------------------------------
+# ---- donor path: D1 -> D4, then sell (S) or donate (N) ---------------------
+async def _parse(text: str | None, images: list[tuple[bytes, str]],
+                 item_id: str | None = None) -> ParsedItem:
+    emit("orchestrator", "New item received", item_id=item_id)
+    try:
+        parsed = await parser.parse_item(text, images)
+    except Exception as e:
+        emit("orchestrator", f"Couldn't read the item: {e}", item_id=item_id)
+        raise FlowError(502, f"The parser couldn't read this item: {e}") from e
+    emit("parser", f"Identified {_label(parsed)}", item_id=item_id,
+         event_type="item_parsed", category=parsed.category)
+    return parsed
+
+
+async def parse_draft(text: str | None, zip_code: str, donor_id: str,
+                      images: list[tuple[bytes, str]], image_url: str | None,
+                      draft_id: str) -> DraftOut:
+    """D1-D4: parse and keep it as a draft. Nothing goes to `items` yet."""
+    parsed = await _parse(text, images)
+    db.insert_draft({"id": draft_id, "donor_id": donor_id, "zip": zip_code, "note": text,
+                     "image_url": image_url, "item": parsed.model_dump(),
+                     "created_at": db.now()})
+    return DraftOut(draft_id=draft_id, item=parsed, image_url=image_url)
+
+
+def _get_draft(draft_id: str) -> dict:
+    row = db.get_draft(draft_id)
+    if row is None or db.now() - row["created_at"] > DRAFT_TTL:
+        raise FlowError(404, f"Draft {draft_id} not found, expired, or already used.")
+    return row
+
+
+async def donate_draft(draft_id: str, pickup_zip: str | None = None) -> DonateOut:
+    """N1-N3: embed, insert as available, consume the draft."""
+    row = _get_draft(draft_id)
+    parsed = ParsedItem.model_validate(row["item"])
+    vec = await llm.embed(_embed_text(parsed.model_dump()))   # before claiming the draft
+    if db.pop_draft(draft_id) is None:                         # a double-click got it first
+        raise FlowError(404, f"Draft {draft_id} was already used.")
+    item_id = db.new_item_id()
+    item = await store(parsed, row["note"], (pickup_zip or "").strip() or row["zip"],
+                       row["donor_id"], row["image_url"], item_id, vec)
+    return DonateOut(item_id=item.id, status=item.status,
+                     message=f"Thanks! Your {parsed.item} is now searchable.")
+
+
 async def donate(note: str | None, zip_code: str, donor_id: str,
                  image_bytes: bytes | None, image_mime: str,
                  image_url: str | None, item_id: str) -> Item:
-    emit("orchestrator", "New donation received", item_id=item_id)
-    parsed = await parser.parse_item(note, [(image_bytes, image_mime)] if image_bytes else [])
-    emit("parser", f"Identified {_label(parsed)}", item_id=item_id,
-         event_type="item_parsed", category=parsed.category)
+    """Legacy one-step POST /api/items: parse + donate."""
+    parsed = await _parse(note, [(image_bytes, image_mime)] if image_bytes else [], item_id)
     return await store(parsed, note, zip_code, donor_id, image_url, item_id)
 
 
 async def store(parsed: ParsedItem, note: str | None, zip_code: str,
-                donor_id: str, image_url: str | None, item_id: str) -> Item:
-    vec = await llm.embed(_embed_text(parsed.model_dump()))
+                donor_id: str, image_url: str | None, item_id: str,
+                vec: list[float] | None = None) -> Item:
+    if vec is None:
+        vec = await llm.embed(_embed_text(parsed.model_dump()))
     row = {**parsed.model_dump(), "id": item_id, "donor_id": donor_id, "note": note,
            "zip": zip_code, "image_url": image_url, "status": "available",
            "embedding": vec, "created_at": db.now()}

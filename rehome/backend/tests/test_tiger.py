@@ -136,6 +136,16 @@ def test_listings(pg):
         pg.update_listing(lst_id, bogus=1)
 
 
+def test_drafts_roundtrip_and_pop_once(pg):
+    draft_id = pg.new_draft_id()
+    item = {"category": "outerwear", "item": "coat", "attributes": ["hooded"]}
+    pg.insert_draft({"id": draft_id, "donor_id": "d", "zip": "54311", "note": None,
+                     "image_url": None, "item": item, "created_at": pg.now()})
+    assert draft_id.startswith("drf_") and pg.get_draft(draft_id)["item"] == item
+    assert pg.pop_draft(draft_id)["zip"] == "54311"
+    assert pg.pop_draft(draft_id) is None and pg.get_draft(draft_id) is None
+
+
 def test_events_feed_order_and_fields(pg):
     a = pg.insert_event({"agent": "parser", "message": "one", "event_type": "item_parsed",
                          "category": "outerwear", "created_at": pg.now()})

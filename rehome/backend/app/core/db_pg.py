@@ -6,6 +6,7 @@ when DATABASE_URL is set. Create the tables first: python scripts/init_db.py
 import math
 from datetime import datetime, timezone
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from app.core import config
 
@@ -84,6 +85,31 @@ def new_request_id() -> str:
 
 def new_listing_id() -> str:
     return f"lst_{_next('listing_seq'):04d}"
+
+
+def new_draft_id() -> str:
+    return f"drf_{_next('draft_seq'):04d}"
+
+
+# ---- drafts ----------------------------------------------------------------
+_DRAFT_SELECT = "id, donor_id, zip, note, image_url, item, created_at"
+
+
+def insert_draft(row: dict) -> dict:
+    _run("""INSERT INTO drafts (id, donor_id, zip, note, image_url, item, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+         (row["id"], row["donor_id"], row["zip"], row.get("note"), row.get("image_url"),
+          Jsonb(row["item"]), row["created_at"]))
+    return row
+
+
+def get_draft(draft_id: str) -> dict | None:
+    return _one(f"SELECT {_DRAFT_SELECT} FROM drafts WHERE id = %s", (draft_id,))
+
+
+def pop_draft(draft_id: str) -> dict | None:
+    """Atomic: two concurrent donates of one draft can't both get it."""
+    return _one(f"DELETE FROM drafts WHERE id = %s RETURNING {_DRAFT_SELECT}", (draft_id,))
 
 
 # ---- items -----------------------------------------------------------------

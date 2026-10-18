@@ -13,7 +13,7 @@ Database: **Tiger Data** (managed Postgres + TimescaleDB). pgvector does matchin
 | role | string | app | `donor` or `requester` |
 | zip | string | app | |
 
-## drafts *(in memory or a table; nothing goes to `items` until the donor chooses)*
+## drafts *(a Tiger table, in memory without `DATABASE_URL`; nothing goes to `items` until the donor chooses; expire after 24 h; donating deletes the draft)*
 
 | Field | Type | Writer | Notes |
 |---|---|---|---|
