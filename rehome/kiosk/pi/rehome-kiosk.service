@@ -1,0 +1,15 @@
+# systemd user unit for server.py. pi/setup.sh installs it and enables lingering,
+# so it starts at boot and redeploys can restart it without sudo.
+[Unit]
+Description=ReHome kiosk server (camera, button, LEDs, kiosk page)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/rehome-kiosk
+EnvironmentFile=-%h/rehome-kiosk/kiosk.env
+ExecStart=/usr/bin/python3 -u %h/rehome-kiosk/server.py --port 8080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
