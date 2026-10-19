@@ -32,7 +32,7 @@
         error = '';
       } catch {
         lost = true;
-        error = `Can’t reach the backend at ${BASE}. Is it running?`;
+        error = `Can’t reach the backend at ${BASE || 'localhost:8000'}. Is it running?`;
       }
       if (alive) timer = setTimeout(tick, 1000);
     };

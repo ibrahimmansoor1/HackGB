@@ -1,5 +1,5 @@
 <script>
-  import { parseItem, sellDraft, donateDraft, postDraft, handleDraft } from '$lib/api.js';
+  import { parseItem, sellDraft, donateDraft, postDraft, handleDraft, mediaUrl } from '$lib/api.js';
   import { takePendingPhoto } from '$lib/pending.js';
   import ListingInfo from '$lib/ListingInfo.svelte';
   import DropOff from '$lib/DropOff.svelte';
@@ -113,7 +113,7 @@
 {:else}
   {@const it = draft.item}
   <h2>{it.color} {it.brand ? `${it.brand} ` : ''}{it.item}</h2>
-  {#if draft.image_url}<img src={draft.image_url} alt={it.summary} width="240" class="rounded-lg" />{/if}
+  {#if draft.image_url}<img src={mediaUrl(draft.image_url)} alt={it.summary} width="240" class="rounded-lg" />{/if}
   <p>{it.summary}</p>
   <p>{it.attributes.join(', ')} · {it.condition}{it.size ? ` · size ${it.size}` : ''}</p>
 

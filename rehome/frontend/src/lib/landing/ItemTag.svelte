@@ -7,6 +7,7 @@
   import Plug from '@lucide/svelte/icons/plug';
   import Baby from '@lucide/svelte/icons/baby';
   import Package from '@lucide/svelte/icons/package';
+  import { mediaUrl } from '$lib/api.js';
 
   let { item, tilt = 0 } = $props();
 
@@ -25,7 +26,7 @@
     <span class="absolute top-3.5 left-1/2 size-3 -translate-x-1/2 rounded-full bg-ground ring-2 ring-night/15"
       aria-hidden="true"></span>
     {#if item.image_url}
-      <img src={item.image_url} alt="" loading="lazy" class="aspect-square w-full rounded-md bg-white/50 object-cover" />
+      <img src={mediaUrl(item.image_url)} alt="" loading="lazy" class="aspect-square w-full rounded-md bg-white/50 object-cover" />
     {:else}
       <div class="grid aspect-square w-full place-items-center rounded-md bg-white/35">
         <Icon class="size-10 opacity-55" strokeWidth={1.5} />

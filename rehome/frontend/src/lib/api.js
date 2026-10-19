@@ -1,8 +1,13 @@
 // The ONLY file that talks to the backend. Contract: docs/04-api-contract.md
 import { env } from '$env/dynamic/public';
 
-// Trailing slash removed so `${BASE}/api/...` never becomes `//api`.
-export const BASE = (env.PUBLIC_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
+// Unset = same origin, through the Vite proxy (vite.config.js), so any device on
+// the network works. Trailing slash removed so `${BASE}/api/...` never becomes `//api`.
+export const BASE = (env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+
+// Photo URLs come back absolute to http://localhost:8000, which only resolves on
+// the backend laptop. Re-root them on BASE so other devices can load them.
+export const mediaUrl = (url) => url?.replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?=\/)/, BASE);
 
 async function handle(res) {
   const body = await res.json().catch(() => ({}));

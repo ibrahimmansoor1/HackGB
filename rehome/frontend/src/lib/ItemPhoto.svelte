@@ -13,6 +13,7 @@
   import Umbrella from '@lucide/svelte/icons/umbrella';
   import Baby from '@lucide/svelte/icons/baby';
   import Package from '@lucide/svelte/icons/package';
+  import { mediaUrl } from '$lib/api.js';
 
   let { item, class: cls = '' } = $props();
 
@@ -38,7 +39,7 @@
 </script>
 
 {#if real}
-  <img src={item.image_url} alt={item.summary ?? item.item} loading="lazy"
+  <img src={mediaUrl(item.image_url)} alt={item.summary ?? item.item} loading="lazy"
     class="size-full object-cover {cls}" />
 {:else}
   <div class="relative grid size-full place-items-center {cls}"
